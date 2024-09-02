@@ -9,7 +9,7 @@ fi
 if [ "$1" = "build-web" ]; then
 	echo "building the app for web"
 	mkdir -p build
-	emcc -o build/index.html ./main.cpp -I/usr/local/include -L./lib -l:libraylibweb.a \
+	emcc -o build/index.html ./main.cpp -I./raylib/src -L./lib -l:libraylibweb.a \
 	-s USE_GLFW=3 -s ASYNCIFY --shell-file=hatori.html
 fi
 
