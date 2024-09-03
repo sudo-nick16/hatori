@@ -1,6 +1,5 @@
 #include "raylib.h"
 #include "raylib/src/raylib.h"
-#include <cstdio>
 #include <vector>
 
 using namespace std;
@@ -78,13 +77,11 @@ int main() {
             .y1 = scaledY,
         };
         drawings.push_back(line);
-        DrawLine(prev_cursor_x, prev_cursor_y, cursor_x, cursor_y, WHITE);
       }
 
       if (right_mouse_down) {
         offset_x += (cursor_x - prev_cursor_x) / scale;
         offset_y += (cursor_y - prev_cursor_y) / scale;
-        redraw();
       }
 
       prev_cursor_x = cursor_x;
@@ -92,7 +89,6 @@ int main() {
     }
 
     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-      printf("left pressed\n");
       left_mouse_down = true;
       right_mouse_down = false;
       prev_cursor_x = cursor_x;
@@ -124,13 +120,13 @@ int main() {
       float t = y * (pos.y / HEIGHT);
       offset_x -= l;
       offset_y -= t;
-      redraw();
     }
+
+    redraw();
 
     EndDrawing();
   }
 
   CloseWindow();
-
   return 0;
 }
