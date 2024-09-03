@@ -10,7 +10,7 @@ if [ "$1" = "build-web" ]; then
 	echo "building the app for web"
 	mkdir -p build
 	emcc -o build/index.html ./main.cpp -I./raylib/src -L./lib -l:libraylibweb.a \
-	-s USE_GLFW=3 -s ASYNCIFY --shell-file=hatori.html
+	-s USE_GLFW=3 -s ASYNCIFY --shell-file=hatori.html -s EXPORT_ALL=1
 fi
 
 if [ "$1" = "raylib" ]; then
