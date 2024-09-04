@@ -6,22 +6,36 @@
 	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 	<title>Hatori</title>
 </head>
+<style>
+	html,
+	body {
+		margin: 0px;
+		padding: 0px;
+		overflow: hidden;
+	}
+
+	#clear {
+		position: absolute;
+		top: 20px;
+		right: 20px;
+		cursor: pointer;
+	}
+</style>
 
 <body>
+	<button id="clear">Clear</button>
 	<canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex=-1></canvas>
 	<script type='text/javascript'>
+		const clearBtn = document.getElementById('clear');
 		var Module = {
 			canvas: (() => {
 				var canvas = document.getElementById('canvas');
-				// canvas.height = window.innerHeight;
-				// canvas.width = window.innerWidth;
-				// As a default initial behavior, pop up an alert when webgl context is lost. To make your
-				// application robust, you may want to override this behavior before shipping!
-				// See http://www.khronos.org/registry/webgl/specs/latest/1.0/#5.15.2
-				canvas.addEventListener("webglcontextlost", (e) => {alert('WebGL context lost. You will need to reload the page.'); e.preventDefault();}, false);
 				return canvas;
 			})(),
 		};
+		clearBtn.addEventListener("click", () => {
+			Module.ccall("clear", null, null, null);
+		})
 		window.onerror = (event) => {
 			console.log("ERROR:", event);
 		};

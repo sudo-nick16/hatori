@@ -9,8 +9,9 @@ fi
 if [ "$1" = "build-web" ]; then
 	echo "building the app for web"
 	mkdir -p build
-	emcc -o build/index.html ./main.cpp -I./raylib/src -L./lib -l:libraylibweb.a \
-	-s USE_GLFW=3 -s ASYNCIFY --shell-file=hatori.html -s EXPORT_ALL=1
+	emcc -O0 -o build/index.html ./main.cpp -I./raylib/src -L./lib -l:libraylibweb.a \
+	-s USE_GLFW=3 -s ASYNCIFY --shell-file=hatori.html -s LINKABLE=1 -s EXPORT_ALL=1 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
+	-O0	-sALLOW_MEMORY_GROWTH -s "EXPORTED_RUNTIME_METHODS=['ccall']"
 fi
 
 if [ "$1" = "raylib" ]; then
