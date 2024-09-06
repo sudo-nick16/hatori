@@ -1,28 +1,33 @@
-#include "raylib/src/raylib.h"
 #include <cstdio>
+#include <cstdlib>
 #include <math.h>
+#include <string>
 #include <vector>
+
+#define DSUPPORT_FILEFORMAT_SVG
+#include "raylib/src/raylib.h"
 
 using namespace std;
 
-static float WIDTH = 800;
-static float HEIGHT = 600;
+static const int WIDTH = 800;
+static const int HEIGHT = 600;
 static Color BACKGROUND = Color{20, 18, 24, 255};
 
-enum Draw_Mode { RECTANGLE, BRUSH, SELECTION };
+enum Draw_Mode { RECTANGLE_MODE, BRUSH_MODE, SELECTION_MODE, TEXT_MODE };
 
-float offset_x = 0;
-float offset_y = 0;
-float scale = 1;
-float cursor_x = 0;
-float cursor_y = 0;
-float prev_cursor_x = 0;
-float prev_cursor_y = 0;
-bool left_mouse_down = false;
-bool right_mouse_down = false;
-Draw_Mode mode = BRUSH;
-int rect_line_z = 0;
-int coll_top_most_z = 0;
+static float offset_x = 0;
+static float offset_y = 0;
+static float scale = 1;
+static float cursor_x = 0;
+static float cursor_y = 0;
+static float prev_cursor_x = 0;
+static float prev_cursor_y = 0;
+static bool left_mouse_down = false;
+static bool right_mouse_down = false;
+static Draw_Mode mode = BRUSH_MODE;
+static int rect_line_z = 0;
+static int coll_top_most_z = 0;
+static bool selected_rect = false;
 
 float to_screen_x(float x) { return (x + offset_x) * scale; }
 
@@ -64,9 +69,17 @@ struct Hatori_Image {
   Texture2D texture;
 };
 
+struct Hatori_Text {
+  string text;
+  float x;
+  float y;
+  int font_size;
+};
+
 vector<Line> lines;
 vector<Hatori_Rectangle> rect_lines;
 vector<Hatori_Image> images;
+vector<Hatori_Text> texts;
 
 Rectangle to_true_rect(Rectangle rect) {
   return Rectangle{
@@ -133,54 +146,273 @@ void redraw() {
     Hatori_Rectangle rect = rect_lines[i];
     rect.rect = to_true_rect(rect.rect);
     if (rect.z == coll_top_most_z) {
-      DrawRectangleLinesEx(rect.rect, 5, BLUE);
+      if (mode == Draw_Mode::SELECTION_MODE) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+          selected_rect = true;
+          printf("click left\n");
+          prev_cursor_x = cursor_x;
+          prev_cursor_y = cursor_y;
+          DrawRectangleLinesEx(rect.rect, 3, BLUE);
+        } else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && is_cursor_moving()) {
+          printf("released left\n");
+          rect_lines[i].rect.x += (cursor_x - prev_cursor_x) / scale;
+          rect_lines[i].rect.y += (cursor_y - prev_cursor_y) / scale;
+          prev_cursor_x = cursor_x;
+          prev_cursor_y = cursor_y;
+          printf("x: %f, y: %f \n", (cursor_x - prev_cursor_x),
+                 (cursor_y - prev_cursor_y));
+        }
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+          selected_rect = false;
+          prev_cursor_x = cursor_x;
+          prev_cursor_y = cursor_y;
+        }
+        DrawRectangleLinesEx(rect.rect, 3, WHITE);
+      } else {
+        DrawRectangleLinesEx(rect.rect, 3, GRAY);
+      }
     } else {
-      DrawRectangleLinesEx(rect.rect, 5, WHITE);
+      DrawRectangleLinesEx(rect.rect, 3, GRAY);
     }
+  }
+
+  for (int i = 0; i < texts.size(); ++i) {
+    DrawRectangleLines(texts[i].x - 10, texts[i].y,
+                       MeasureText(texts[i].text.c_str(), 40) + 20, 40, GRAY);
+    DrawText(texts[i].text.c_str(), texts[i].x, texts[i].y, texts[i].font_size,
+             WHITE);
   }
 }
 
-#ifdef __cplusplus
-extern "C" {
-#endif // !__cplusplus
+Texture2D LoadImageEx(const char *filepath, int width, int height) {
+  Image img = {0};
+  const char *extension = GetFileExtension(filepath);
+  if (TextIsEqual(extension, ".svg")) {
+    img = LoadImageSvg(filepath, width, height);
+  } else {
+    img = LoadImage(filepath);
+  }
+  if (!IsImageReady(img)) {
+    fprintf(stderr, "Image not ready! - %s\n", filepath);
+    exit(1);
+  }
+  UnloadImage(img);
+  return LoadTextureFromImage(img);
+}
+
 void clear() {
   rect_lines.clear();
   images.clear();
   lines.clear();
 }
 
-float get_scale() { return scale; }
-
-void set_mode(Draw_Mode m) { mode = m; }
-
-#ifdef __cplusplus
+bool IsClickedRec(Rectangle rec) {
+  return CheckCollisionPointRec(GetMousePosition(), rec) &&
+         IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
-#endif // !__cplusplus
+
+struct Hatori_Icon {
+  Texture2D *texture;
+  Rectangle *parent;
+  float side;
+  float pad;
+  int index;
+  bool selected;
+};
+
+float get_updated_x(float side, float pad, int n) {
+  return GetScreenWidth() / 2.0f - ((side + pad) * n) / 2;
+}
+
+Hatori_Icon create_icon_inside_con(Texture2D *text, Rectangle *rect, float side,
+                                   float pad, int index) {
+  return Hatori_Icon{
+      .texture = text,
+      .parent = rect,
+      .side = side,
+      .pad = pad,
+      .index = index,
+      .selected = false,
+  };
+}
+
+Rectangle icon_to_rect(Hatori_Icon icon) {
+  return Rectangle{
+      icon.parent->x + (icon.side + icon.pad) * icon.index + icon.pad / 2,
+      icon.parent->y + icon.pad / 2,
+      icon.side,
+      icon.side,
+  };
+}
+
+bool is_icon_clicked(Hatori_Icon *icon) {
+  return CheckCollisionPointRec(GetMousePosition(), icon_to_rect(*icon)) &&
+         IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+}
+
+void draw_icon(Hatori_Icon icon) {
+  Rectangle rect = icon_to_rect(icon);
+
+  if (CheckCollisionPointRec(GetMousePosition(), rect) &&
+      IsMouseButtonUp(MOUSE_BUTTON_LEFT)) {
+    DrawRectangle(rect.x - icon.pad / 2, rect.y - icon.pad / 2,
+                  rect.width + icon.pad, rect.height + icon.pad, PURPLE);
+  }
+  if (icon.selected) {
+    DrawRectangle(rect.x - icon.pad / 2, rect.y - icon.pad / 2,
+                  rect.width + icon.pad, rect.height + icon.pad, PURPLE);
+  }
+  DrawTexturePro(
+      *icon.texture,
+      Rectangle{0, 0, (float)icon.texture->width, (float)icon.texture->height},
+      rect, Vector2{0, 0}, 0, icon.selected ? BLACK : WHITE);
+}
 
 int main() {
   SetConfigFlags(FLAG_WINDOW_RESIZABLE);
   SetConfigFlags(FLAG_MSAA_4X_HINT);
 
   InitWindow(WIDTH, HEIGHT, "hatori");
-
   SetTargetFPS(60);
+
+  // Load assets
+  static float ICON_SIDE = 20;
+  static float ICON_PAD = 20;
+  static int N_ICONS = 6;
+
+  Texture2D bin_txt = LoadImageEx("assets/bin.png", ICON_SIDE, ICON_SIDE);
+  Texture2D pointer_txt =
+      LoadImageEx("assets/pointer.png", ICON_SIDE, ICON_SIDE);
+  Texture2D rect_txt =
+      LoadImageEx("assets/rectangle.png", ICON_SIDE, ICON_SIDE);
+  Texture2D pen_txt = LoadImageEx("assets/pen.png", ICON_SIDE, ICON_SIDE);
+  Texture2D text_txt = LoadImageEx("assets/text.png", ICON_SIDE, ICON_SIDE);
+  Texture2D image_txt = LoadImageEx("assets/image.png", ICON_SIDE, ICON_SIDE);
+
+  Rectangle icon_container = Rectangle{
+      GetScreenWidth() / 2.0f - ((ICON_SIDE + ICON_PAD) * N_ICONS) / 2, 10,
+      (ICON_SIDE + ICON_PAD) * N_ICONS, ICON_SIDE + ICON_PAD};
+
+  Hatori_Icon bin_icon =
+      create_icon_inside_con(&bin_txt, &icon_container, ICON_SIDE, ICON_PAD, 0);
+  Hatori_Icon pointer_icon = create_icon_inside_con(
+      &pointer_txt, &icon_container, ICON_SIDE, ICON_PAD, 1);
+  Hatori_Icon rect_icon = create_icon_inside_con(&rect_txt, &icon_container,
+                                                 ICON_SIDE, ICON_PAD, 2);
+  Hatori_Icon pen_icon =
+      create_icon_inside_con(&pen_txt, &icon_container, ICON_SIDE, ICON_PAD, 3);
+  Hatori_Icon text_icon = create_icon_inside_con(&text_txt, &icon_container,
+                                                 ICON_SIDE, ICON_PAD, 4);
+  Hatori_Icon image_icon = create_icon_inside_con(&image_txt, &icon_container,
+                                                  ICON_SIDE, ICON_PAD, 5);
+
+  vector<Hatori_Icon *> icons = {};
+  icons.push_back(&bin_icon);
+  icons.push_back(&pointer_icon);
+  icons.push_back(&rect_icon);
+  icons.push_back(&pen_icon);
+  icons.push_back(&text_icon);
+  icons.push_back(&image_icon);
+
+  char *buf = (char *)malloc(100);
 
   while (!WindowShouldClose()) {
     BeginDrawing();
-
     redraw();
+
+    icon_container.x = get_updated_x(ICON_SIDE, ICON_PAD, 5);
+
+    DrawRectangleRec(icon_container, Color{35, 35, 41, 255});
+
+    for (int i = 0; i < icons.size(); ++i) {
+      draw_icon(*icons[i]);
+    }
+
+    if (is_icon_clicked(&bin_icon)) {
+      clear();
+    }
+
+    if (is_icon_clicked(&pointer_icon)) {
+      for (int i = 0; i < icons.size(); ++i) {
+        if (i != 1) {
+          icons[i]->selected = false;
+        } else {
+          icons[i]->selected = true;
+        }
+      }
+      printf("SELECTION MODE\n");
+
+      mode = Draw_Mode::SELECTION_MODE;
+    }
+    if (is_icon_clicked(&rect_icon)) {
+      rect_icon.selected = true;
+
+      for (int i = 0; i < icons.size(); ++i) {
+        if (i != 2) {
+          icons[i]->selected = false;
+        } else {
+          icons[i]->selected = true;
+        }
+      }
+
+      mode = Draw_Mode::RECTANGLE_MODE;
+    }
+    if (is_icon_clicked(&pen_icon)) {
+      for (int i = 0; i < icons.size(); ++i) {
+        if (i != 3) {
+          icons[i]->selected = false;
+        } else {
+          icons[i]->selected = true;
+        }
+      }
+
+      mode = Draw_Mode::BRUSH_MODE;
+    }
+    if (is_icon_clicked(&text_icon)) {
+      text_icon.selected = true;
+      for (int i = 0; i < icons.size(); ++i) {
+        if (i != 4) {
+          icons[i]->selected = false;
+        } else {
+          icons[i]->selected = true;
+        }
+      }
+
+      Hatori_Text text = {
+          .text = string("Enter text"),
+          .x = GetScreenWidth() / 2.0f,
+          .y = GetScreenHeight() / 2.0f,
+          .font_size = 40,
+      };
+
+      texts.push_back(text);
+    }
+
+    if (is_icon_clicked(&image_icon)) {
+      image_icon.selected = true;
+
+      for (int i = 0; i < icons.size(); ++i) {
+        if (i != 5) {
+          icons[i]->selected = false;
+        } else {
+          icons[i]->selected = true;
+        }
+      }
+    }
 
     Vector2 pos = GetMousePosition();
     cursor_x = pos.x;
     cursor_y = pos.y;
 
-    for (int i = rect_lines.size() - 1; i >= 0; --i) {
-      if (CheckCollisionPointRec(pos, to_true_rect(rect_lines[i].rect))) {
-        coll_top_most_z = rect_lines[i].z;
-        goto L1;
+    if (!selected_rect) {
+      for (int i = rect_lines.size() - 1; i >= 0; --i) {
+        if (CheckCollisionPointRec(pos, to_true_rect(rect_lines[i].rect))) {
+          coll_top_most_z = rect_lines[i].z;
+          goto L1;
+        }
       }
+      coll_top_most_z = -1;
     }
-    coll_top_most_z = -1;
 
   L1:
 
@@ -191,11 +423,15 @@ int main() {
       float prev_scaled_y = to_true_y(prev_cursor_y);
 
       if (left_mouse_down) {
-        if (mode == Draw_Mode::RECTANGLE) {
+        if (mode == Draw_Mode::SELECTION_MODE && !selected_rect) {
           DrawRectangleLines(prev_cursor_x, prev_cursor_y,
                              abs(cursor_x - prev_cursor_x),
                              abs(cursor_y - prev_cursor_y), WHITE);
-        } else {
+        } else if (mode == Draw_Mode::RECTANGLE_MODE) {
+          DrawRectangleLines(prev_cursor_x, prev_cursor_y,
+                             abs(cursor_x - prev_cursor_x),
+                             abs(cursor_y - prev_cursor_y), WHITE);
+        } else if (mode == Draw_Mode::BRUSH_MODE) {
           Line line = {
               .x0 = prev_scaled_x,
               .y0 = prev_scaled_y,
@@ -232,7 +468,7 @@ int main() {
 
     if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
       left_mouse_down = false;
-      if (mode == Draw_Mode::RECTANGLE) {
+      if (mode == Draw_Mode::RECTANGLE_MODE) {
         float scaled_x = to_true_x(cursor_x);
         float scaled_y = to_true_y(cursor_y);
         float scaled_prev_x = to_true_x(prev_cursor_x);
@@ -260,7 +496,7 @@ int main() {
     }
 
     if (IsKeyDown(KEY_R)) {
-      mode = Draw_Mode::RECTANGLE;
+      mode = Draw_Mode::RECTANGLE_MODE;
     }
 
     int wheel_move = GetMouseWheelMove();
@@ -297,6 +533,8 @@ int main() {
     }
     EndDrawing();
   }
+
+  UnloadTexture(pointer_txt);
 
   CloseWindow();
   return 0;

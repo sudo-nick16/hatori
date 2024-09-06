@@ -3,7 +3,7 @@
 if [ "$1" = "build" ]; then
 	echo "building the app .."
 	mkdir -p build
-	clang++ -o build/main ./main.cpp -L./lib -l:libraylib.a -lm -lpthread -lGL  -ldl -lrt -lX11 -lglfw
+	clang++ -o build/main main.cpp -L./lib -l:libraylib.a -lm -lpthread -lGL -ldl -lrt -lX11 -lglfw
 fi
 
 if [ "$1" = "build-web" ]; then
