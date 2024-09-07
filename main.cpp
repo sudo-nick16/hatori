@@ -26,8 +26,10 @@ static bool left_mouse_down = false;
 static bool right_mouse_down = false;
 static Draw_Mode mode = BRUSH_MODE;
 static int rect_line_z = 0;
-static int coll_top_most_z = 0;
+static int coll_top_most_z = -1;
 static bool selected_rect = false;
+static bool selected_text = false;
+static int text_top_most_z = -1;
 
 float to_screen_x(float x) { return (x + offset_x) * scale; }
 
@@ -73,6 +75,8 @@ struct Hatori_Text {
   string text;
   float x;
   float y;
+  int z;
+  bool selected;
   int font_size;
 };
 
@@ -149,18 +153,15 @@ void redraw() {
       if (mode == Draw_Mode::SELECTION_MODE) {
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
           selected_rect = true;
-          printf("click left\n");
           prev_cursor_x = cursor_x;
           prev_cursor_y = cursor_y;
           DrawRectangleLinesEx(rect.rect, 3, BLUE);
-        } else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && is_cursor_moving()) {
-          printf("released left\n");
+        } else if (selected_rect && IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
+                   is_cursor_moving()) {
           rect_lines[i].rect.x += (cursor_x - prev_cursor_x) / scale;
           rect_lines[i].rect.y += (cursor_y - prev_cursor_y) / scale;
           prev_cursor_x = cursor_x;
           prev_cursor_y = cursor_y;
-          printf("x: %f, y: %f \n", (cursor_x - prev_cursor_x),
-                 (cursor_y - prev_cursor_y));
         }
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
           selected_rect = false;
@@ -177,8 +178,34 @@ void redraw() {
   }
 
   for (int i = 0; i < texts.size(); ++i) {
-    DrawRectangleLines(texts[i].x - 10, texts[i].y,
-                       MeasureText(texts[i].text.c_str(), 40) + 20, 40, GRAY);
+    if (texts[i].z == text_top_most_z) {
+      if (mode == Draw_Mode::SELECTION_MODE) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+          selected_text = true;
+					texts[i].selected = true;
+          prev_cursor_x = cursor_x;
+          prev_cursor_y = cursor_y;
+        } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+          selected_text = false;
+          prev_cursor_x = cursor_x;
+          prev_cursor_y = cursor_y;
+        } else if (selected_text && IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
+                   is_cursor_moving()) {
+          printf("selected text\n");
+          texts[i].x += (cursor_x - prev_cursor_x) / scale;
+          texts[i].y += (cursor_y - prev_cursor_y) / scale;
+          prev_cursor_x = cursor_x;
+          prev_cursor_y = cursor_y;
+          DrawRectangleLines(texts[i].x - 10, texts[i].y,
+                             MeasureText(texts[i].text.c_str(), 40) + 20, 40,
+                             WHITE);
+        } else {
+          DrawRectangleLines(texts[i].x - 10, texts[i].y,
+                             MeasureText(texts[i].text.c_str(), 40) + 20, 40,
+                             GRAY);
+        }
+      }
+    }
     DrawText(texts[i].text.c_str(), texts[i].x, texts[i].y, texts[i].font_size,
              WHITE);
   }
@@ -204,6 +231,7 @@ void clear() {
   rect_lines.clear();
   images.clear();
   lines.clear();
+  texts.clear();
 }
 
 bool IsClickedRec(Rectangle rec) {
@@ -266,6 +294,16 @@ void draw_icon(Hatori_Icon icon) {
       *icon.texture,
       Rectangle{0, 0, (float)icon.texture->width, (float)icon.texture->height},
       rect, Vector2{0, 0}, 0, icon.selected ? BLACK : WHITE);
+}
+
+void select_icon(vector<Hatori_Icon *> &icons, int index) {
+  for (int i = 0; i < icons.size(); ++i) {
+    if (i == index) {
+      icons[i]->selected = true;
+    } else {
+      icons[i]->selected = false;
+    }
+  }
 }
 
 int main() {
@@ -333,71 +371,24 @@ int main() {
     }
 
     if (is_icon_clicked(&pointer_icon)) {
-      for (int i = 0; i < icons.size(); ++i) {
-        if (i != 1) {
-          icons[i]->selected = false;
-        } else {
-          icons[i]->selected = true;
-        }
-      }
-      printf("SELECTION MODE\n");
-
+      select_icon(icons, pointer_icon.index);
       mode = Draw_Mode::SELECTION_MODE;
     }
     if (is_icon_clicked(&rect_icon)) {
-      rect_icon.selected = true;
-
-      for (int i = 0; i < icons.size(); ++i) {
-        if (i != 2) {
-          icons[i]->selected = false;
-        } else {
-          icons[i]->selected = true;
-        }
-      }
-
+      select_icon(icons, rect_icon.index);
       mode = Draw_Mode::RECTANGLE_MODE;
     }
     if (is_icon_clicked(&pen_icon)) {
-      for (int i = 0; i < icons.size(); ++i) {
-        if (i != 3) {
-          icons[i]->selected = false;
-        } else {
-          icons[i]->selected = true;
-        }
-      }
-
+      select_icon(icons, pen_icon.index);
       mode = Draw_Mode::BRUSH_MODE;
     }
     if (is_icon_clicked(&text_icon)) {
-      text_icon.selected = true;
-      for (int i = 0; i < icons.size(); ++i) {
-        if (i != 4) {
-          icons[i]->selected = false;
-        } else {
-          icons[i]->selected = true;
-        }
-      }
-
-      Hatori_Text text = {
-          .text = string("Enter text"),
-          .x = GetScreenWidth() / 2.0f,
-          .y = GetScreenHeight() / 2.0f,
-          .font_size = 40,
-      };
-
-      texts.push_back(text);
+      select_icon(icons, text_icon.index);
+      mode = Draw_Mode::TEXT_MODE;
     }
 
     if (is_icon_clicked(&image_icon)) {
-      image_icon.selected = true;
-
-      for (int i = 0; i < icons.size(); ++i) {
-        if (i != 5) {
-          icons[i]->selected = false;
-        } else {
-          icons[i]->selected = true;
-        }
-      }
+      select_icon(icons, image_icon.index);
     }
 
     Vector2 pos = GetMousePosition();
@@ -413,9 +404,21 @@ int main() {
       }
       coll_top_most_z = -1;
     }
-
   L1:
-
+    if (!selected_text) {
+      for (int i = texts.size() - 1; i >= 0; --i) {
+        if (CheckCollisionPointRec(
+                pos, to_true_rect(Rectangle{
+                         texts[i].x, texts[i].y,
+                         (float)MeasureText(texts[i].text.c_str(), 40), 40}))) {
+          printf("colliding\n");
+          text_top_most_z = texts[i].z;
+          goto L2;
+        }
+      }
+      text_top_most_z = -1;
+    }
+  L2:
     if (is_cursor_moving()) {
       float scaled_x = to_true_x(cursor_x);
       float scaled_y = to_true_y(cursor_y);
@@ -468,7 +471,24 @@ int main() {
 
     if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
       left_mouse_down = false;
-      if (mode == Draw_Mode::RECTANGLE_MODE) {
+      if (mode == Draw_Mode::TEXT_MODE &&
+          !CheckCollisionPointRec(pos, icon_to_rect(text_icon))) {
+        float scaled_x = to_true_x(cursor_x);
+        float scaled_y = to_true_y(cursor_y);
+
+        Hatori_Text text = {
+            .text = string("Enter text"),
+            .x = scaled_x,
+            .y = scaled_y,
+            .z = rect_line_z++,
+            .font_size = 40,
+        };
+
+        texts.push_back(text);
+        select_icon(icons, pointer_icon.index);
+        mode = Draw_Mode::SELECTION_MODE;
+      } else if (mode == Draw_Mode::RECTANGLE_MODE &&
+                 !CheckCollisionPointRec(pos, icon_to_rect(rect_icon))) {
         float scaled_x = to_true_x(cursor_x);
         float scaled_y = to_true_y(cursor_y);
         float scaled_prev_x = to_true_x(prev_cursor_x);
@@ -480,6 +500,9 @@ int main() {
             abs(scaled_y - scaled_prev_y),
         };
         rect_lines.push_back(Hatori_Rectangle{rect, WHITE, rect_line_z++});
+
+        mode = Draw_Mode::SELECTION_MODE;
+        select_icon(icons, pointer_icon.index);
       }
       prev_cursor_x = cursor_x;
       prev_cursor_y = cursor_y;
