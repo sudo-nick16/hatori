@@ -1,19 +1,16 @@
-#include <cstdio>
-#include <cstdlib>
-#include <math.h>
+#include "hatori.h"
+#include "external/raylib/src/raylib.h"
 #include <string>
 #include <vector>
 
-#define DSUPPORT_FILEFORMAT_SVG
-#include "raylib/src/raylib.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 using namespace std;
 
 static const int WIDTH = 800;
 static const int HEIGHT = 600;
 static Color BACKGROUND = Color{20, 18, 24, 255};
-
-enum Draw_Mode { RECTANGLE_MODE, BRUSH_MODE, SELECTION_MODE, TEXT_MODE };
 
 static float offset_x = 0;
 static float offset_y = 0;
@@ -27,8 +24,8 @@ static bool right_mouse_down = false;
 static Draw_Mode mode = BRUSH_MODE;
 static int rect_line_z = 0;
 static int coll_top_most_z = -1;
-static bool selected_rect = false;
-static bool selected_text = false;
+static int selected_rect = -1;
+static int selected_text = -1;
 static int text_top_most_z = -1;
 
 float to_screen_x(float x) { return (x + offset_x) * scale; }
@@ -43,44 +40,7 @@ float true_width() { return (float)GetScreenWidth() / scale; }
 
 float true_height() { return (float)GetScreenHeight() / scale; }
 
-struct Line {
-  float x0;
-  float y0;
-  float x1;
-  float y1;
-};
-
-struct Hatori_Button {
-  const char *text;
-  Vector2 pos;
-  Vector2 pad;
-};
-
-struct Hatori_Rectangle {
-  Rectangle rect;
-  Color color;
-  int z;
-};
-
-struct Hatori_Image {
-  Vector2 pos;
-  int width;
-  int height;
-  int mipmaps;
-  int format;
-  Texture2D texture;
-};
-
-struct Hatori_Text {
-  string text;
-  float x;
-  float y;
-  int z;
-  bool selected;
-  int font_size;
-};
-
-vector<Line> lines;
+vector<Hatori_Line> lines;
 vector<Hatori_Rectangle> rect_lines;
 vector<Hatori_Image> images;
 vector<Hatori_Text> texts;
@@ -96,24 +56,6 @@ Rectangle to_true_rect(Rectangle rect) {
 
 bool is_cursor_moving() {
   return cursor_x != prev_cursor_x || cursor_y != prev_cursor_y;
-}
-
-void draw_button(Hatori_Button btn) {
-  DrawRectangle(btn.pos.x, btn.pos.y, MeasureText(btn.text, 20) + btn.pad.x,
-                20 + btn.pad.y, WHITE);
-  DrawText(btn.text, btn.pos.x + btn.pad.x / 2.0f, btn.pos.y + btn.pad.y / 2.0,
-           20.0, BLACK);
-}
-
-void on_button_click(Hatori_Button btn, void(func)(Hatori_Button)) {
-  if (CheckCollisionPointRec(
-          GetMousePosition(),
-          Rectangle{btn.pos.x, btn.pos.y,
-                    (float)MeasureText(btn.text, 20) + btn.pad.x,
-                    20 + btn.pad.y}) &&
-      IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-    func(btn);
-  }
 }
 
 void redraw() {
@@ -142,7 +84,7 @@ void redraw() {
                        img.width * scale, img.height * scale, WHITE);
   }
   for (int i = 0; i < lines.size(); ++i) {
-    Line l = lines[i];
+    Hatori_Line l = lines[i];
     DrawLineEx(Vector2{to_screen_x(l.x0), to_screen_y(l.y0)},
                Vector2{to_screen_x(l.x1), to_screen_y(l.y1)}, 2.0, WHITE);
   }
@@ -152,19 +94,19 @@ void redraw() {
     if (rect.z == coll_top_most_z) {
       if (mode == Draw_Mode::SELECTION_MODE) {
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-          selected_rect = true;
+          selected_rect = i;
           prev_cursor_x = cursor_x;
           prev_cursor_y = cursor_y;
           DrawRectangleLinesEx(rect.rect, 3, BLUE);
-        } else if (selected_rect && IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
-                   is_cursor_moving()) {
+        } else if (selected_rect != -1 &&
+                   IsMouseButtonDown(MOUSE_BUTTON_LEFT) && is_cursor_moving()) {
           rect_lines[i].rect.x += (cursor_x - prev_cursor_x) / scale;
           rect_lines[i].rect.y += (cursor_y - prev_cursor_y) / scale;
           prev_cursor_x = cursor_x;
           prev_cursor_y = cursor_y;
         }
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-          selected_rect = false;
+          selected_rect = -1;
           prev_cursor_x = cursor_x;
           prev_cursor_y = cursor_y;
         }
@@ -181,16 +123,16 @@ void redraw() {
     if (texts[i].z == text_top_most_z) {
       if (mode == Draw_Mode::SELECTION_MODE) {
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-          selected_text = true;
-					texts[i].selected = true;
+          selected_text = i;
+          texts[i].selected = true;
           prev_cursor_x = cursor_x;
           prev_cursor_y = cursor_y;
         } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-          selected_text = false;
+          selected_text = -1;
           prev_cursor_x = cursor_x;
           prev_cursor_y = cursor_y;
-        } else if (selected_text && IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
-                   is_cursor_moving()) {
+        } else if (selected_text != -1 &&
+                   IsMouseButtonDown(MOUSE_BUTTON_LEFT) && is_cursor_moving()) {
           printf("selected text\n");
           texts[i].x += (cursor_x - prev_cursor_x) / scale;
           texts[i].y += (cursor_y - prev_cursor_y) / scale;
@@ -238,15 +180,6 @@ bool IsClickedRec(Rectangle rec) {
   return CheckCollisionPointRec(GetMousePosition(), rec) &&
          IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
-
-struct Hatori_Icon {
-  Texture2D *texture;
-  Rectangle *parent;
-  float side;
-  float pad;
-  int index;
-  bool selected;
-};
 
 float get_updated_x(float side, float pad, int n) {
   return GetScreenWidth() / 2.0f - ((side + pad) * n) / 2;
@@ -395,7 +328,7 @@ int main() {
     cursor_x = pos.x;
     cursor_y = pos.y;
 
-    if (!selected_rect) {
+    if (selected_rect == -1) {
       for (int i = rect_lines.size() - 1; i >= 0; --i) {
         if (CheckCollisionPointRec(pos, to_true_rect(rect_lines[i].rect))) {
           coll_top_most_z = rect_lines[i].z;
@@ -405,7 +338,7 @@ int main() {
       coll_top_most_z = -1;
     }
   L1:
-    if (!selected_text) {
+    if (selected_text == -1) {
       for (int i = texts.size() - 1; i >= 0; --i) {
         if (CheckCollisionPointRec(
                 pos, to_true_rect(Rectangle{
@@ -435,7 +368,7 @@ int main() {
                              abs(cursor_x - prev_cursor_x),
                              abs(cursor_y - prev_cursor_y), WHITE);
         } else if (mode == Draw_Mode::BRUSH_MODE) {
-          Line line = {
+          Hatori_Line line = {
               .x0 = prev_scaled_x,
               .y0 = prev_scaled_y,
               .x1 = scaled_x,
