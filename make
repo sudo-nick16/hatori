@@ -1,22 +1,5 @@
 #!/bin/bash
 
-if [ "$1" = "h3" ]; then
-	echo "building the app .."
-	mkdir -p build
-	clang++ -Wall -Wextar -g -ggdb -O3 -std=c++11 -o build/hatori src/hatori3.cpp -L./lib -l:libraylib.a -lm -lpthread -lGL -ldl -lrt -lX11 -lglfw
-fi
-
-if [ "$1" = "h2" ]; then
-	echo "building the app .."
-	mkdir -p build
-	clang++ -Wall -Wextar -g -ggdb -O3 -o build/hatori src/hatori2.cpp -L./lib -l:libraylib.a -lm -lpthread -lGL -ldl -lrt -lX11 -lglfw
-fi
-
-if [ "$1" = "build" ]; then
-	echo "building the app .."
-	mkdir -p build
-	clang++ -o build/hatori src/hatori.cpp -L./lib -l:libraylib.a -lm -lpthread -lGL -ldl -lrt -lX11 -lglfw
-fi
 
 if [ "$1" = "build-web" ]; then
 	echo "building the app for web"
@@ -51,3 +34,7 @@ if [ "$1" = "raylib-web" ]; then
 	rm *.o
 	cd ../../../..
 fi
+
+echo "building the app .."
+mkdir -p build
+clang++ -Wall  -g -ggdb -O3 -std=c++11 -o build/hatori $1 -L./lib -l:libraylib.a -lm -lpthread -lGL -ldl -lrt -lX11 -lglfw

@@ -1,9 +1,15 @@
 #include "external/raylib/src/raylib.h"
+#include <cstdint>
 #include <cstdio>
 #include <stdlib.h>
 #include <vector>
 
-static const Color HATORI_BG = Color { 18, 18, 18, 255 };
+typedef uint64_t U64;
+typedef uint32_t U32;
+typedef uint16_t U16;
+typedef uint8_t U8;
+
+static const Color HATORI_BG = Color { 20, 18, 24, 255 };
 static const Color HATORI_PRIMARY = Color { 35, 35, 41, 255 };
 static const Color HATORI_ACCENT = Color { 49, 48, 59, 255 };
 static const Color HATORI_SECONDARY = Color { 64, 62, 106, 255 };
@@ -23,20 +29,11 @@ struct Hatori_Line {
 	float y1;
 };
 
-struct Hatori_BoardState {
-	Mode mode;
-	float offset_x;
-	float offset_y;
-	float scale;
-	std::vector<Hatori_Line> lines;
-};
-
 struct Hatori_TopControls;
 
 struct Hatori_TopControlsBtn {
 	Vector2 pos;
 	Vector2 size;
-
 	Texture2D texture;
 	void (*onclick)(Hatori_TopControls*);
 };
@@ -44,19 +41,17 @@ struct Hatori_TopControlsBtn {
 struct Hatori_TopControls {
 	Vector2 pos;
 	Vector2 size;
-
 	float pad;
 	float side;
 	int selected;
 	int hovered;
-
 	std::vector<Hatori_TopControlsBtn> buttons;
 };
 
-Hatori_BoardState State = Hatori_BoardState { .mode = Mode::SELECTION_MODE };
-
 Hatori_TopControls create_top_controls();
-void select_top_controls(Hatori_TopControls* container, int index);
+Hatori_TopControlsBtn create_top_controls_btn(
+		Texture2D texture, void (*onclick)(Hatori_TopControls*));
+void select_top_controls(Hatori_TopControls* container, U64 index);
 void update_top_controls(Hatori_TopControls* container);
 void handle_input_top_controls(Hatori_TopControls* container);
 void draw_top_controls(Hatori_TopControls* container);
@@ -96,7 +91,7 @@ int main()
 	const int WIDTH = 800;
 	const int HEIGHT = 600;
 
-	InitWindow(800, 600, "hatori");
+	InitWindow(WIDTH, HEIGHT, "hatori");
 	Hatori_TopControls ctrls = create_top_controls();
 
 	while (!WindowShouldClose()) {
@@ -122,7 +117,7 @@ int main()
 	return 0;
 }
 
-void select_top_controls(Hatori_TopControls* container, int index)
+void select_top_controls(Hatori_TopControls* container, U64 index)
 {
 	container->selected = index;
 };
@@ -137,7 +132,7 @@ void update_top_controls(Hatori_TopControls* container)
 
 	container->size.y = container->side + container->pad;
 
-	for (int i = 0; i < container->buttons.size(); ++i) {
+	for (size_t i = 0; i < container->buttons.size(); ++i) {
 		container->buttons[i].pos.x = container->pos.x
 				+ (container->side + container->pad) * i + container->pad / 2;
 		container->buttons[i].pos.y = container->pos.y + container->pad / 2;
@@ -149,7 +144,7 @@ void update_top_controls(Hatori_TopControls* container)
 void handle_input_top_controls(Hatori_TopControls* container)
 {
 	bool hovered = false;
-	for (int i = 0; i < container->buttons.size(); ++i) {
+	for (size_t i = 0; i < container->buttons.size(); ++i) {
 		if (CheckCollisionPointRec(GetMousePosition(),
 						Rectangle { container->buttons[i].pos.x,
 								container->buttons[i].pos.y, container->buttons[i].size.x,
@@ -174,7 +169,7 @@ void handle_input_top_controls(Hatori_TopControls* container)
 void draw_top_controls(Hatori_TopControls* container)
 {
 	DrawRectangleV(container->pos, container->size, HATORI_PRIMARY);
-	for (int i = 0; i < container->buttons.size(); ++i) {
+	for (size_t i = 0; i < container->buttons.size(); ++i) {
 		const Texture2D text = container->buttons[i].texture;
 
 		// hovered over
@@ -190,7 +185,7 @@ void draw_top_controls(Hatori_TopControls* container)
 			DrawRectangle(container->buttons[i].pos.x - container->pad / 2,
 					container->buttons[i].pos.y - container->pad / 2,
 					container->buttons[i].size.x + container->pad,
-					container->buttons[i].size.y + container->pad, HATORI_SECONDARY);
+					container->buttons[i].size.y + container->pad, PURPLE);
 		}
 
 		DrawTexturePro(container->buttons[i].texture,
@@ -201,7 +196,7 @@ void draw_top_controls(Hatori_TopControls* container)
 						container->buttons[i].size.x,
 						container->buttons[i].size.y,
 				},
-				Vector2 { 0, 0 }, 0, container->selected == i ? PURPLE : WHITE);
+				Vector2 { 0, 0 }, 0, container->selected == i ? BLACK : WHITE);
 	}
 }
 
@@ -224,33 +219,40 @@ Hatori_TopControls create_top_controls()
 	Texture2D text_txt = LoadTexture("assets/text.png");
 	Texture2D image_txt = LoadTexture("assets/image.png");
 
-	container.buttons.push_back(Hatori_TopControlsBtn {
-			.texture = bin_txt, .onclick = [](Hatori_TopControls* container) {
+	container.buttons.push_back(Hatori_TopControlsBtn { .pos = Vector2 {},
+			.texture = bin_txt,
+			.onclick = [](Hatori_TopControls* container) {
 				clear_screen();
 				select_top_controls(container, 1);
 			} });
 
-	container.buttons.push_back(Hatori_TopControlsBtn { .texture = pointer_txt,
-			.onclick
-			= [](Hatori_TopControls* container) { mode = Mode::SELECTION_MODE; } });
+	container.buttons.push_back(create_top_controls_btn(
+			pointer_txt, [](Hatori_TopControls*) { mode = Mode::SELECTION_MODE; }));
 
-	container.buttons.push_back(Hatori_TopControlsBtn { .texture = rect_txt,
-			.onclick
-			= [](Hatori_TopControls* container) { mode = Mode::RECTANGLE_MODE; } });
+	container.buttons.push_back(create_top_controls_btn(
+			rect_txt, [](Hatori_TopControls*) { mode = Mode::RECTANGLE_MODE; }));
 
-	container.buttons.push_back(Hatori_TopControlsBtn { .texture = pen_txt,
-			.onclick
-			= [](Hatori_TopControls* container) { mode = Mode::PEN_MODE; } });
+	container.buttons.push_back(create_top_controls_btn(
+			pen_txt, [](Hatori_TopControls*) { mode = Mode::PEN_MODE; }));
 
-	container.buttons.push_back(Hatori_TopControlsBtn { .texture = text_txt,
-			.onclick
-			= [](Hatori_TopControls* container) { mode = Mode::TEXT_MODE; } });
+	container.buttons.push_back(create_top_controls_btn(
+			text_txt, [](Hatori_TopControls*) { mode = Mode::TEXT_MODE; }));
 
-	container.buttons.push_back(Hatori_TopControlsBtn { .texture = image_txt,
-			.onclick
-			= [](Hatori_TopControls* container) { mode = Mode::IMAGE_MODE; } });
+	container.buttons.push_back(create_top_controls_btn(
+			image_txt, [](Hatori_TopControls*) { mode = Mode::IMAGE_MODE; }));
 
 	return container;
+}
+
+Hatori_TopControlsBtn create_top_controls_btn(
+		Texture2D texture, void (*onclick)(Hatori_TopControls*))
+{
+	return Hatori_TopControlsBtn {
+		.pos = Vector2 {},
+		.size = Vector2 {},
+		.texture = texture,
+		.onclick = onclick,
+	};
 }
 
 float to_screen_x(float vir_x) { return (vir_x + offset_x) * scale; }
@@ -290,7 +292,7 @@ void handle_input_lines()
 
 void draw_lines()
 {
-	for (int i = 0; i < lines.size(); ++i) {
+	for (size_t i = 0; i < lines.size(); ++i) {
 		DrawLineEx(Vector2 { to_screen_x(lines[i].x0), to_screen_y(lines[i].y0) },
 				Vector2 { to_screen_x(lines[i].x1), to_screen_y(lines[i].y1) }, 2,
 				WHITE);
@@ -306,8 +308,8 @@ void handle_panning()
 		prev_cursor_y = cursor_y;
 	}
 	if (is_mouse_moving() && IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-		offset_x += prev_cursor_x - cursor_x;
-		offset_y += prev_cursor_y - cursor_y;
+		offset_x -= (prev_cursor_x - cursor_x) / scale;
+		offset_y -= (prev_cursor_y - cursor_y) / scale;
 
 		prev_cursor_x = cursor_x;
 		prev_cursor_y = cursor_y;
