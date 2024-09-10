@@ -12,6 +12,9 @@ struct Hatori_Line {
   float y1;
 };
 
+struct Hatori_Style {
+};
+
 struct Hatori_Rectangle {
   Rectangle rect;
   Color color;

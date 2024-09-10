@@ -1,5 +1,11 @@
 #!/bin/bash
 
+if [ "$1" = "h3" ]; then
+	echo "building the app .."
+	mkdir -p build
+	clang++ -Wall -Wextar -g -ggdb -O3 -std=c++11 -o build/hatori src/hatori3.cpp -L./lib -l:libraylib.a -lm -lpthread -lGL -ldl -lrt -lX11 -lglfw
+fi
+
 if [ "$1" = "h2" ]; then
 	echo "building the app .."
 	mkdir -p build
