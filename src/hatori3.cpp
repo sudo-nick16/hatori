@@ -1,7 +1,11 @@
 #include "external/raylib/src/raylib.h"
+#include "external/raylib/src/rlgl.h"
+#include <GL/gl.h>
 #include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <stdlib.h>
+#include <string.h>
 #include <vector>
 
 typedef uint64_t U64;
@@ -13,6 +17,8 @@ static const Color HATORI_BG = Color { 20, 18, 24, 255 };
 static const Color HATORI_PRIMARY = Color { 35, 35, 41, 255 };
 static const Color HATORI_ACCENT = Color { 49, 48, 59, 255 };
 static const Color HATORI_SECONDARY = Color { 64, 62, 106, 255 };
+
+extern const char* GetFileName(const char* filePath);
 
 enum Mode {
 	SELECTION_MODE,
@@ -27,6 +33,14 @@ struct Hatori_Line {
 	float y0;
 	float x1;
 	float y1;
+};
+
+struct Hatori_Image {
+	Vector2 pos;
+	Vector2 size;
+
+	Texture2D texture;
+	int z;
 };
 
 struct Hatori_TopControls;
@@ -64,12 +78,19 @@ float to_virtual_y(float y);
 bool is_mouse_moving();
 void clear_screen();
 
-void update_lines();
 void handle_input_lines();
 void draw_lines();
 
 void handle_panning();
 void handle_scroll();
+
+void handle_drop_images();
+void handle_input_images();
+void update_images();
+void draw_images();
+
+void take_screenshot_rect(const char* filepath, Rectangle rect);
+void handle_take_screenshot();
 
 Mode mode;
 float offset_x;
@@ -82,6 +103,10 @@ float prev_cursor_y;
 float prev_clicked_cursor_x;
 float prev_clicked_cursor_y;
 std::vector<Hatori_Line> lines;
+std::vector<Hatori_Image> images;
+int i_selected_image = -1;
+int z = 1;
+Shader bloom_shader = { 0 };
 
 int main()
 {
@@ -94,8 +119,15 @@ int main()
 	InitWindow(WIDTH, HEIGHT, "hatori");
 	Hatori_TopControls ctrls = create_top_controls();
 
+	bloom_shader = LoadShader(0,
+			"src/external/raylib/examples/shaders/resources/shaders/glsl330/"
+			"bloom.fs");
+
 	while (!WindowShouldClose()) {
+		handle_take_screenshot();
+
 		BeginDrawing();
+
 		ClearBackground(HATORI_BG);
 		update_top_controls(&ctrls);
 		handle_input_top_controls(&ctrls);
@@ -107,9 +139,14 @@ int main()
 		handle_input_lines();
 		handle_panning();
 		handle_scroll();
+		handle_drop_images();
+		handle_input_images();
+		update_images();
 
+		draw_images();
 		draw_lines();
 		draw_top_controls(&ctrls);
+
 		EndDrawing();
 	}
 
@@ -207,7 +244,7 @@ Hatori_TopControls create_top_controls()
 		.size = Vector2 {},
 		.pad = 20,
 		.side = 20,
-		.selected = -1,
+		.selected = 1,
 		.hovered = -1,
 		.buttons = std::vector<Hatori_TopControlsBtn>(),
 	};
@@ -268,8 +305,6 @@ bool is_mouse_moving()
 	return prev_cursor_x != cursor_x || prev_cursor_y != cursor_y;
 };
 
-void update_lines();
-
 void handle_input_lines()
 {
 	if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -294,7 +329,7 @@ void draw_lines()
 {
 	for (size_t i = 0; i < lines.size(); ++i) {
 		DrawLineEx(Vector2 { to_screen_x(lines[i].x0), to_screen_y(lines[i].y0) },
-				Vector2 { to_screen_x(lines[i].x1), to_screen_y(lines[i].y1) }, 2,
+				Vector2 { to_screen_x(lines[i].x1), to_screen_y(lines[i].y1) }, 3,
 				WHITE);
 	}
 }
@@ -331,5 +366,133 @@ void handle_scroll()
 
 		offset_x -= left;
 		offset_y -= top;
+	}
+}
+
+void handle_drop_images()
+{
+	if (IsFileDropped()) {
+		FilePathList dropped_files = LoadDroppedFiles();
+		for (int i = 0; i < dropped_files.count; ++i) {
+			const char* ext = GetFileExtension(dropped_files.paths[i]);
+			if (!TextIsEqual(ext, ".png")) {
+				continue;
+			}
+			Texture2D texture = LoadTexture(dropped_files.paths[i]);
+			images.push_back(Hatori_Image {
+					.pos = Vector2 { to_virtual_x(cursor_x), to_virtual_y(cursor_y) },
+					.size = Vector2 { (float)texture.width, (float)texture.height },
+					.texture = texture,
+					.z = z++,
+			});
+		}
+		UnloadDroppedFiles(dropped_files);
+	}
+}
+
+void handle_input_images()
+{
+	Vector2 pos = GetMousePosition();
+	int selected = -1;
+	for (int i = images.size() - 1; i >= 0; --i) {
+		Hatori_Image img = images[i];
+		if (mode == Mode::SELECTION_MODE
+				&& CheckCollisionPointRec(pos,
+						Rectangle { to_screen_x(img.pos.x), to_screen_y(img.pos.y),
+								img.size.x * scale, img.size.y * scale })) {
+
+			// just clicked on this thing
+			if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+				selected = i;
+				prev_cursor_x = pos.x;
+				prev_cursor_y = pos.y;
+				break;
+			} else if (i_selected_image != -1 && IsMouseButtonDown(MOUSE_BUTTON_LEFT)
+					&& i_selected_image == i) {
+				// already selected (something or this thing)
+				selected = i;
+			} else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+				selected = i;
+				prev_cursor_x = pos.x;
+				prev_cursor_y = pos.y;
+			}
+		}
+	}
+	i_selected_image = selected;
+}
+
+void update_images()
+{
+	if (is_mouse_moving() && i_selected_image != -1) {
+		images[i_selected_image].pos.x += ((cursor_x - prev_cursor_x) / scale);
+		images[i_selected_image].pos.y += ((cursor_y - prev_cursor_y) / scale);
+		prev_cursor_x = cursor_x;
+		prev_cursor_y = cursor_y;
+	}
+}
+
+void draw_images()
+{
+	for (int i = 0; i < images.size(); ++i) {
+		Hatori_Image img = images[i];
+		if (i_selected_image == i) {
+			DrawRectangleLinesEx(
+					Rectangle { to_screen_x(img.pos.x), to_screen_y(img.pos.y),
+							img.size.x * scale, img.size.y * scale },
+					3, BLUE);
+		}
+		DrawTexturePro(img.texture,
+				Rectangle { 0, 0, (float)img.texture.width, (float)img.texture.height },
+				Rectangle { to_screen_x(img.pos.x), to_screen_y(img.pos.y),
+						img.size.x * scale, img.size.y * scale },
+				Vector2 { 0, 0 }, 0, WHITE);
+	}
+}
+
+void take_screenshot_rect(const char* filepath, Rectangle rect)
+{
+	int height = rect.height;
+	int width = rect.width;
+
+	unsigned char* screenData
+			= (unsigned char*)calloc(width * height * 4, sizeof(unsigned char));
+
+	glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, screenData);
+
+	unsigned char* imgData
+			= (unsigned char*)malloc(height * width * 4 * sizeof(unsigned char));
+
+	for (int y = height - 1; y >= 0; y--) {
+		for (int x = 0; x < (width * 4); x++) {
+			imgData[((height - 1) - y) * width * 4 + x]
+					= screenData[(y * width * 4) + x];
+			if (((x + 1) % 4) == 0)
+				imgData[((height - 1) - y) * width * 4 + x] = 255;
+		}
+	}
+
+	RL_FREE(screenData);
+
+	Image image = { imgData, (int)((float)width), (int)((float)height), 1,
+		PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+
+	char path[512] = { 0 };
+	strcpy(
+			path, TextFormat("%s/%s", GetWorkingDirectory(), GetFileName(filepath)));
+
+	ExportImage(image, path);
+}
+
+void handle_take_screenshot()
+{
+	if (IsKeyPressed(KEY_S)) {
+		char filename[30] = { 0 };
+		sprintf(filename, "%ld.png", time(NULL));
+		if (i_selected_image != -1) {
+			take_screenshot_rect(filename, Rectangle {});
+		} else {
+			TakeScreenshot(filename);
+		}
+		// take_screenshot_image("for_beloved_user.png", images[z_selected_image]);
 	}
 }
