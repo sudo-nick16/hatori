@@ -1,8 +1,5 @@
-BasedOnStyle: Webkit
+BasedOnStyle: WebKit
 TabWidth: 2
 IndentWidth: 2
 UseTab: Always
 ColumnLimit: 80
-
-Language: Cpp
-Standard: Cpp11
