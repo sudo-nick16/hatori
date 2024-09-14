@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 if [ "$1" = "build-web" ]; then
 	echo "building the app for web"
 	mkdir -p build
@@ -37,4 +36,4 @@ fi
 
 echo "building the app .."
 mkdir -p build
-clang -Wall  -g -ggdb -O3 -std=c11 -o build/hatori $1 -L./lib -l:libraylib.a -lm -lpthread -lGL -ldl -lrt -lX11 -lglfw
+clang -Wall -g -ggdb -O3 -std=c11 -o build/hatori $1 -L./lib -l:libraylib.a -lm -lpthread -lGL -ldl -lrt -lX11 -lglfw
