@@ -36,4 +36,4 @@ fi
 
 echo "building the app .."
 mkdir -p build
-clang -Wall -g -ggdb -O3 -std=c11 -o build/hatori $1 -L./lib -l:libraylib.a -lm -lpthread -lGL -ldl -lrt -lX11 -lglfw
+clang -Wall -g -ggdb -pedantic  -O3 -std=c11 -o build/hatori src/hatori3.c -L./lib -l:libraylib.a -lm -lpthread -lGL -ldl -lrt -lX11 -lglfw
