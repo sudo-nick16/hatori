@@ -4,26 +4,9 @@
 #include <string.h>
 #include <time.h>
 
-#define SUPPORT_FILEFORMAT_PNG 1
-#define SUPPORT_FILEFORMAT_BMP 1
-#define SUPPORT_FILEFORMAT_TGA 1
-#define SUPPORT_FILEFORMAT_JPG 1
-#define SUPPORT_FILEFORMAT_GIF 1
-#define SUPPORT_FILEFORMAT_QOI 1
-#define SUPPORT_FILEFORMAT_PSD 1
-#define SUPPORT_FILEFORMAT_DDS 1
-#define SUPPORT_FILEFORMAT_HDR 1
-#define SUPPORT_FILEFORMAT_PIC 1
-#define SUPPORT_FILEFORMAT_KTX 1
-#define SUPPORT_FILEFORMAT_ASTC 1
-#define SUPPORT_FILEFORMAT_PKM 1
-#define SUPPORT_FILEFORMAT_PVR 1
-#define SUPPORT_FILEFORMAT_SVG 1
-
 #include "ds.h"
 #include "external/raylib/src/raylib.h"
 #include "external/raylib/src/rlgl.h"
-#include "external/raylib/src/rtextures.c"
 
 typedef uint64_t U64;
 typedef uint32_t U32;
@@ -109,6 +92,18 @@ typedef struct Hatori_Resizer {
 	int padding;
 } Hatori_Resizer;
 
+typedef struct Hatori_Text {
+	Vector2 pos;
+	Vector2 size;
+
+	List(char) text;
+
+	Color color;
+	int spacing;
+	int font_size;
+	bool wrap;
+} Hatori_Text;
+
 Hatori_Controls create_top_controls(void);
 Hatori_ControlsBtn create_controls_btn(
 		Texture2D texture, void (*onclick)(void));
@@ -119,6 +114,7 @@ void draw_controls(Hatori_Controls* controls);
 
 float to_screen_y(float vir_y);
 float to_screen_x(float vir_x);
+Vector2 to_screen(Vector2);
 float to_virtual_x(float x);
 float to_virtual_y(float y);
 Rectangle img_to_rect(Hatori_Image img);
@@ -150,6 +146,9 @@ void back_on_click_image(void);
 void front_on_click_image(void);
 void copy_on_click_image(void);
 void fill_on_click_image(void);
+void save_on_click_image(void);
+void reset_on_click_image(void);
+void dig_on_click_image(void);
 
 Hatori_Controls create_image_controls(void);
 void update_image_controls(void);
@@ -166,14 +165,27 @@ void handle_input_erasure(void);
 void handle_input_resizer(void);
 void update_resizer(void);
 void draw_resizer(void);
+Rectangle get_image_resizer_rect(Hatori_Image img);
+Rectangle get_text_resizer_rect(Hatori_Text text);
 
 bool is_similar(Color c1, Color c2, int diff);
-void flood_remove(Image img, Vector2 pos, int diff);
+void flood_remove(Image* img, Vector2 pos, int diff);
+void erode_image(Image* img);
 
 void hatori_print_image(Hatori_Image img);
 
-float to_true_img_x(Hatori_Image img, float x);
-float to_true_img_y(Hatori_Image img, float x);
+float to_true_img_x(U64 i, float x);
+float to_true_img_y(U64 i, float x);
+Rectangle get_image_rect(U64 i);
+
+Hatori_Text create_text(void);
+void handle_input_texts(void);
+void update_texts(void);
+void draw_texts(void);
+
+void draw_scale(void);
+
+void normalize_z(void);
 
 Mode mode;
 float offset_x;
@@ -194,6 +206,9 @@ Hatori_Controls img_controls;
 U64 pen_thickness = 2;
 U64 erasure_thickness = 10;
 Hatori_Resizer resizer = { 0 };
+Font anton_font;
+List(Hatori_Text) texts;
+int i_selected_text = -1;
 
 int main(void)
 {
@@ -213,6 +228,8 @@ int main(void)
 	resizer.padding = 8;
 	resizer.selected = -1;
 
+	anton_font = LoadFontEx("assets/Anton-Regular.ttf", 200, NULL, 0);
+
 	// Hatori_Slider thickness_slider = {
 	// 	.pos = { top_controls.pos.x + top_controls.size.x + 20,
 	// 			top_controls.pos.y + top_controls.size.y / 2 },
@@ -225,15 +242,14 @@ int main(void)
 
 	while (!WindowShouldClose()) {
 		DrawFPS(0, 0);
+
 		Vector2 pos = GetMousePosition();
 		cursor_x = pos.x;
 		cursor_y = pos.y;
 
 		handle_input_screenshot();
+		handle_drop_images();
 
-		BeginDrawing();
-
-		ClearBackground(BLANK);
 		update_top_controls();
 		handle_input_controls(&top_controls);
 
@@ -243,25 +259,33 @@ int main(void)
 		handle_input_lines();
 		handle_panning();
 		handle_scroll();
-		handle_drop_images();
 		handle_input_controls(&img_controls);
 		handle_input_images();
+		handle_input_texts();
+
+		normalize_z();
 		handle_input_resizer();
 
+		update_texts();
+		update_resizer();
 		update_images();
 		update_image_controls();
-		update_resizer();
+
+		BeginDrawing();
+		ClearBackground(BLANK);
 
 		draw_images();
+		draw_texts();
+		draw_lines();
+
 		draw_resizer();
 		draw_controls(&img_controls);
-		draw_lines();
+		draw_controls(&top_controls);
 
 		handle_input_erasure();
 
-		draw_controls(&top_controls);
 		draw_screenshot();
-
+		draw_scale();
 		EndDrawing();
 	}
 
@@ -282,7 +306,13 @@ void rect_on_click(void) { mode = RECTANGLE_MODE; }
 
 void pen_on_click(void) { mode = PEN_MODE; }
 
-void text_on_click(void) { mode = TEXT_MODE; }
+void text_on_click(void)
+{
+	// mode = TEXT_MODE;
+	Hatori_Text txt = create_text();
+	i_selected_text = texts.count;
+	list_append(&texts, txt);
+}
 
 void image_on_click(void) { mode = SCREENSHOT_MODE; }
 
@@ -426,6 +456,14 @@ float to_screen_x(float vir_x) { return (vir_x + offset_x) * scale; }
 
 float to_screen_y(float vir_y) { return (vir_y + offset_y) * scale; }
 
+Vector2 to_screen(Vector2 pos)
+{
+	return (Vector2) {
+		.x = to_screen_x(pos.x),
+		.y = to_screen_y(pos.y),
+	};
+};
+
 float to_virtual_x(float x) { return (x / scale) - offset_x; }
 
 float to_virtual_y(float y) { return (y / scale) - offset_y; }
@@ -492,7 +530,7 @@ void handle_scroll(void)
 {
 	float move = GetMouseWheelMove();
 	if (move != 0) {
-		float scale_amount = (float)move / 5.0;
+		float scale_amount = .20 * move;
 		scale = scale * (1 + scale_amount);
 
 		float x = ((float)GetScreenWidth() / scale) * scale_amount;
@@ -511,10 +549,6 @@ void handle_drop_images(void)
 	if (IsFileDropped()) {
 		FilePathList dropped_files = LoadDroppedFiles();
 		for (int i = 0; i < dropped_files.count; ++i) {
-			// const char* ext = GetFileExtension(dropped_files.paths[i]);
-			// if (!TextIsEqual(ext, ".png")) {
-			// 	continue;
-			// }
 			Image img = LoadImage(dropped_files.paths[i]);
 			ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
 			Texture2D texture = LoadTextureFromImage(img);
@@ -536,19 +570,21 @@ void handle_drop_images(void)
 
 void handle_input_images(void)
 {
-	if (img_controls.selected != 5 && resizer.selected == -1
+	if (img_controls.selected != 5
 			&& (mode == SELECTION_MODE || mode == MOVE_OBJECT_MODE)) {
+
 		Vector2 pos = GetMousePosition();
 		int selected = i_selected_image;
+
 		for (int i = images.count - 1; i >= 0; --i) {
+
 			Hatori_Image img = images.items[i];
+
 			if (img.deleted) {
 				continue;
 			}
 
-			bool colliding = CheckCollisionPointRec(pos,
-					(Rectangle) { to_screen_x(img.pos.x), to_screen_y(img.pos.y),
-							img.size.x * scale, img.size.y * scale });
+			bool colliding = CheckCollisionPointRec(pos, get_image_resizer_rect(img));
 
 			if ((i_selected_image == -1
 							|| (i_selected_image != -1
@@ -571,10 +607,14 @@ void handle_input_images(void)
 					break;
 				} else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
 					selected = i;
+					resizer.selected = -1;
 					prev_cursor_x = pos.x;
 					prev_cursor_y = pos.y;
 					mode = SELECTION_MODE;
 					break;
+				} else {
+					// messes up with overlay resizes
+					// resizer.selected = -1;
 				}
 			} else {
 				if (CheckCollisionPointRec(pos,
@@ -585,13 +625,8 @@ void handle_input_images(void)
 						|| IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
 					selected = -1;
 					img_controls.selected = -1;
+					resizer.selected = -1;
 					mode = SELECTION_MODE;
-				}
-				if (CheckCollisionPointRec(pos,
-								(Rectangle) { resizer.tl.x, resizer.tl.y,
-										(resizer.br.x + resizer.side - resizer.bl.x),
-										(resizer.br.y + resizer.side - resizer.tr.y) })) {
-					selected = i_selected_image;
 				}
 			}
 		}
@@ -601,6 +636,7 @@ void handle_input_images(void)
 
 void update_images(void)
 {
+
 	if (is_mouse_moving() && i_selected_image != -1 && mode == MOVE_OBJECT_MODE) {
 		images.items[i_selected_image].pos.x
 				+= ((cursor_x - prev_cursor_x) / scale);
@@ -629,10 +665,10 @@ void draw_images(void)
 
 void take_screenshot_rect(const char* filepath, Rectangle rect)
 {
-	Vector2 scale = GetWindowScaleDPI();
+	Vector2 win_scale = GetWindowScaleDPI();
 
-	int width = rect.width * scale.x;
-	int height = rect.height * scale.y;
+	int width = rect.width * win_scale.x;
+	int height = rect.height * win_scale.y;
 
 	unsigned char* screenData
 			= (unsigned char*)calloc(width * height * 4, sizeof(unsigned char));
@@ -656,7 +692,11 @@ void take_screenshot_rect(const char* filepath, Rectangle rect)
 		PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
 
 	Texture2D text = LoadTextureFromImage(image);
-	Hatori_Image img = { .texture = text, .size = { text.width, text.height } };
+	Hatori_Image img = { 0 };
+	img.texture = text;
+	img.size.x = (float)text.width / scale;
+	img.size.y = (float)text.height / scale;
+
 	list_append(&images, img);
 
 	char path[512] = { 0 };
@@ -767,6 +807,34 @@ void front_on_click_image(void)
 
 void fill_on_click_image(void) { }
 
+void dig_on_click_image(void)
+{
+	if (i_selected_image != -1) {
+		Image tmp = LoadImageFromTexture(images.items[i_selected_image].texture);
+		erode_image(&tmp);
+		images.items[i_selected_image].texture = LoadTextureFromImage(tmp);
+		UnloadImage(tmp);
+
+		img_controls.selected = -1;
+	}
+}
+
+void reset_on_click_image(void)
+{
+	if (i_selected_image != -1) {
+		img_controls.selected = -1;
+	}
+}
+
+void save_on_click_image(void)
+{
+	if (i_selected_image != 1) {
+		Image img = LoadImageFromTexture(images.items[i_selected_image].texture);
+		ExportImage(img, "hatori_image.png");
+		img_controls.selected = -1;
+	}
+}
+
 void copy_on_click_image(void)
 {
 	if (i_selected_image != 1) {
@@ -774,7 +842,6 @@ void copy_on_click_image(void)
 		tmp.pos.x += 10 * scale;
 		tmp.pos.y += 10 * scale;
 		list_append(&images, tmp);
-
 		img_controls.selected = -1;
 	}
 }
@@ -797,6 +864,9 @@ Hatori_Controls create_image_controls(void)
 	Texture2D down = LoadTexture("assets/down.png");
 	Texture2D fill = LoadTexture("assets/fill.png");
 	Texture2D copy = LoadTexture("assets/copy.png");
+	Texture2D save = LoadTexture("assets/save.png");
+	Texture2D reset = LoadTexture("assets/reset.png");
+	Texture2D dig = LoadTexture("assets/dig.png");
 
 	list_append(
 			&controls.buttons, create_controls_btn(hflip, hflip_on_click_image));
@@ -810,6 +880,11 @@ Hatori_Controls create_image_controls(void)
 			&controls.buttons, create_controls_btn(fill, fill_on_click_image));
 	list_append(
 			&controls.buttons, create_controls_btn(copy, copy_on_click_image));
+	list_append(
+			&controls.buttons, create_controls_btn(save, save_on_click_image));
+	list_append(
+			&controls.buttons, create_controls_btn(reset, reset_on_click_image));
+	list_append(&controls.buttons, create_controls_btn(dig, dig_on_click_image));
 
 	return controls;
 }
@@ -847,25 +922,25 @@ void handle_shortcuts(void)
 		top_controls.selected = 1;
 		mode = SELECTION_MODE;
 	}
-	if (IsKeyPressed(KEY_S)) {
-		mode = SCREENSHOT_MODE;
-		top_controls.selected = 5;
-	}
-	if (IsKeyPressed(KEY_D)) {
-		clear_screen();
-	}
-	if (IsKeyPressed(KEY_P)) {
-		mode = PEN_MODE;
-		top_controls.selected = 3;
-	}
-	if (IsKeyPressed(KEY_N)) {
-		mode = SELECTION_MODE;
-		top_controls.selected = 1;
-	}
-	if (IsKeyPressed(KEY_T)) {
-		mode = TEXT_MODE;
-		top_controls.selected = 4;
-	}
+	// if (IsKeyPressed(KEY_S)) {
+	// 	mode = SCREENSHOT_MODE;
+	// 	top_controls.selected = 5;
+	// }
+	// if (IsKeyPressed(KEY_D)) {
+	// 	clear_screen();
+	// }
+	// if (IsKeyPressed(KEY_P)) {
+	// 	mode = PEN_MODE;
+	// 	top_controls.selected = 3;
+	// }
+	// if (IsKeyPressed(KEY_N)) {
+	// 	mode = SELECTION_MODE;
+	// 	top_controls.selected = 1;
+	// }
+	// if (IsKeyPressed(KEY_T)) {
+	// 	mode = TEXT_MODE;
+	// 	top_controls.selected = 4;
+	// }
 	if (IsKeyPressed(KEY_EQUAL)) {
 		if (mode == ERASURE_MODE) {
 			if (erasure_thickness + 5 <= 100) {
@@ -891,7 +966,7 @@ void handle_shortcuts(void)
 		}
 	}
 	if (IsKeyPressed(KEY_D)) {
-		if (i_selected_image != 1) {
+		if (i_selected_image != -1) {
 			images.items[i_selected_image].deleted = true;
 			i_selected_image = -1;
 			img_controls.selected = -1;
@@ -964,17 +1039,20 @@ void handle_input_erasure(void)
 	// TODO: Do very bad design i think
 	Vector2 pos = GetMousePosition();
 	if (mode == ERASURE_MODE) {
-		for (int i = images.count - 1; i >= 0; --i) {
-			Hatori_Image img = images.items[i];
+		if (i_selected_image != -1) {
+			Hatori_Image img = images.items[i_selected_image];
 			if (CheckCollisionCircleRec(pos, erasure_thickness, img_to_rect(img))) {
 				if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)
 						|| IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 					Image tmp = LoadImageFromTexture(img.texture);
-					ImageDrawCircle(&tmp, to_true_img_x(img, pos.x),
-							to_true_img_y(img, pos.y), erasure_thickness / scale, BLANK);
-					images.items[i].texture = LoadTextureFromImage(tmp);
+
+					ImageDrawCircle(&tmp, to_true_img_x(i_selected_image, pos.x),
+							to_true_img_y(i_selected_image, pos.y),
+							(erasure_thickness / scale) / (img.size.x / img.texture.width),
+							BLANK);
+
+					images.items[i_selected_image].texture = LoadTextureFromImage(tmp);
 					UnloadImage(tmp);
-					break;
 				}
 			}
 		}
@@ -982,7 +1060,9 @@ void handle_input_erasure(void)
 			Hatori_Line l = lines.items[i];
 			if (!l.deleted) {
 				if (CheckCollisionCircleLine(pos, erasure_thickness,
-								(Vector2) { l.x0, l.y0 }, (Vector2) { l.x1, l.y1 })) {
+								(Vector2) { to_screen_x(l.x0), to_screen_y(l.y0) },
+								(Vector2) { to_screen_x(l.x1), to_screen_y(l.y1) })
+						&& IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
 					lines.items[i].deleted = true;
 				}
 			}
@@ -1014,26 +1094,32 @@ void handle_input_resizer(void)
 	Vector2 pos = GetMousePosition();
 	int selected = resizer.selected;
 
-	if (i_selected_image != -1 && resizer.selected != -1
-			// && CheckCollisionPointRec(pos,
-			// 		(Rectangle) { resizer.tl.x, resizer.tl.y,
-			// 				resizer.br.x + resizer.side - resizer.tl.x,
-			// 				resizer.br.y + resizer.side - resizer.tl.y })
-	) {
-		if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-			images.items[i_selected_image].size.x
-					+= (cursor_x - prev_cursor_x) / scale;
-			images.items[i_selected_image].size.y
-					+= (cursor_y - prev_cursor_y) / scale;
-			prev_cursor_x = cursor_x;
-			prev_cursor_y = cursor_y;
-		} else {
-			resizer.selected = -1;
+	if (resizer.selected != -1) {
+		if (i_selected_image != -1) {
+			if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+				images.items[i_selected_image].size.x
+						+= (cursor_x - prev_cursor_x) / scale;
+				images.items[i_selected_image].size.y
+						+= (cursor_y - prev_cursor_y) / scale;
+				prev_cursor_x = cursor_x;
+				prev_cursor_y = cursor_y;
+			} else {
+				resizer.selected = -1;
+			}
+		} else if (i_selected_text != -1) {
+			if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+				texts.items[i_selected_text].font_size
+						+= (cursor_x - prev_cursor_x) * 0.50 / scale;
+				prev_cursor_x = cursor_x;
+				prev_cursor_y = cursor_y;
+			} else {
+				resizer.selected = -1;
+			}
 		}
 		return;
 	}
 
-	if (i_selected_image != -1) {
+	if (i_selected_image != -1 || i_selected_text != -1) {
 		if (CheckCollisionPointRec(pos,
 						(Rectangle) {
 								resizer.tl.x, resizer.tl.y, resizer.side, resizer.side })) {
@@ -1041,77 +1127,42 @@ void handle_input_resizer(void)
 				prev_cursor_x = cursor_x;
 				prev_cursor_y = cursor_y;
 				selected = 1;
-			} else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && is_mouse_moving()
-					&& selected != -1) {
-				images.items[i_selected_image].size.x
-						+= (cursor_x - prev_cursor_x) / scale;
-				images.items[i_selected_image].size.y
-						+= (cursor_y - prev_cursor_y) / scale;
-				prev_cursor_x = cursor_x;
-				prev_cursor_y = cursor_y;
 			} else {
 				selected = -1;
 			}
-		}
-		if (CheckCollisionPointRec(pos,
-						(Rectangle) {
-								resizer.tr.x, resizer.tr.y, resizer.side, resizer.side })) {
+		} else if (CheckCollisionPointRec(pos,
+									 (Rectangle) { resizer.tr.x, resizer.tr.y, resizer.side,
+											 resizer.side })) {
 			if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 				prev_cursor_x = cursor_x;
 				prev_cursor_y = cursor_y;
 				selected = 2;
-			} else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && is_mouse_moving()
-					&& selected != -1) {
-				images.items[i_selected_image].size.x
-						+= (cursor_x - prev_cursor_x) / scale;
-				images.items[i_selected_image].size.y
-						+= (cursor_y - prev_cursor_y) / scale;
-				prev_cursor_x = cursor_x;
-				prev_cursor_y = cursor_y;
 			} else {
 				selected = -1;
 			}
-		}
-		if (CheckCollisionPointRec(pos,
-						(Rectangle) {
-								resizer.bl.x, resizer.bl.y, resizer.side, resizer.side })) {
+		} else if (CheckCollisionPointRec(pos,
+									 (Rectangle) { resizer.bl.x, resizer.bl.y, resizer.side,
+											 resizer.side })) {
 			if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 				prev_cursor_x = cursor_x;
 				prev_cursor_y = cursor_y;
 				selected = 3;
-			} else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && is_mouse_moving()
-					&& selected != -1) {
-				images.items[i_selected_image].size.x
-						+= (cursor_x - prev_cursor_x) / scale;
-				images.items[i_selected_image].size.y
-						+= (cursor_y - prev_cursor_y) / scale;
-				prev_cursor_x = cursor_x;
-				prev_cursor_y = cursor_y;
 			} else {
 				selected = -1;
 			}
-		}
-		if (CheckCollisionPointRec(pos,
-						(Rectangle) {
-								resizer.br.x, resizer.br.y, resizer.side, resizer.side })) {
+		} else if (CheckCollisionPointRec(pos,
+									 (Rectangle) { resizer.br.x, resizer.br.y, resizer.side,
+											 resizer.side })) {
 			if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 				prev_cursor_x = cursor_x;
 				prev_cursor_y = cursor_y;
 				selected = 4;
-			} else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && is_mouse_moving()
-					&& selected != -1) {
-				images.items[i_selected_image].size.x
-						+= (cursor_x - prev_cursor_x) / scale;
-				images.items[i_selected_image].size.y
-						+= (cursor_y - prev_cursor_y) / scale;
-				prev_cursor_x = cursor_x;
-				prev_cursor_y = cursor_y;
-			} else {
-				selected = -1;
 			}
+			prev_cursor_y = cursor_y;
+		} else {
+			selected = -1;
 		}
 	}
-
 	resizer.selected = selected;
 }
 
@@ -1142,6 +1193,33 @@ void update_resizer(void)
 			tl.x + img.size.x * scale + 2 * resizer.padding - resizer.side / 2,
 			resizer.bl.y,
 		};
+	} else if (i_selected_text != -1) {
+		Hatori_Text txt = texts.items[i_selected_text];
+
+		Vector2 tl = { to_screen_x(txt.pos.x) - resizer.padding,
+			to_screen_y(txt.pos.y) - resizer.padding };
+
+		resizer.tl = (Vector2) {
+			tl.x - resizer.side / 2,
+			tl.y - resizer.side / 2,
+		};
+
+		resizer.tr = (Vector2) {
+			tl.x + txt.size.x + 2 * resizer.padding - resizer.side / 2,
+			tl.y - resizer.side / 2.0,
+		};
+
+		resizer.bl = (Vector2) {
+			tl.x - resizer.side / 2,
+			tl.y + txt.size.y + 2 * resizer.padding - resizer.side / 2,
+		};
+
+		resizer.br = (Vector2) {
+			tl.x + txt.size.x + 2 * resizer.padding - resizer.side / 2,
+			resizer.bl.y,
+		};
+	} else {
+		resizer.selected = -1;
 	}
 }
 
@@ -1164,6 +1242,23 @@ void draw_resizer(void)
 		DrawRectangle(
 				resizer.br.x, resizer.br.y, resizer.side, resizer.side, PURPLE);
 	}
+	if (i_selected_text != -1) {
+		Hatori_Text text = texts.items[i_selected_text];
+		DrawRectangleLinesEx(
+				(Rectangle) { to_screen_x(text.pos.x) - resizer.padding,
+						to_screen_y(text.pos.y) - resizer.padding,
+						text.size.x + 2 * resizer.padding,
+						text.size.y + 2 * resizer.padding },
+				resizer.thickness, PURPLE);
+		DrawRectangle(
+				resizer.tl.x, resizer.tl.y, resizer.side, resizer.side, PURPLE);
+		DrawRectangle(
+				resizer.tr.x, resizer.tr.y, resizer.side, resizer.side, PURPLE);
+		DrawRectangle(
+				resizer.bl.x, resizer.bl.y, resizer.side, resizer.side, PURPLE);
+		DrawRectangle(
+				resizer.br.x, resizer.br.y, resizer.side, resizer.side, PURPLE);
+	}
 }
 
 bool is_similar(Color c1, Color c2, int diff)
@@ -1175,9 +1270,11 @@ bool is_similar(Color c1, Color c2, int diff)
 	return false;
 }
 
-void flood_remove(Image img, Vector2 pos, int diff)
+void flood_remove(Image* img, Vector2 pos, int diff)
 {
-	Color color = ((Color*)img.data)[(int)((int)pos.y * img.width + (int)pos.x)];
+	int height = img->height;
+	int width = img->width;
+	Color color = ((Color*)img->data)[(int)((int)pos.y * width + (int)pos.x)];
 
 	List(Vector2) stack;
 	list_init(&stack, 10);
@@ -1187,26 +1284,92 @@ void flood_remove(Image img, Vector2 pos, int diff)
 		Vector2 curr_pos = stack.items[stack.count - 1];
 		stack.count--;
 
-		if (curr_pos.x < 0 || curr_pos.x >= img.width || curr_pos.y < 0
-				|| curr_pos.y >= img.height) {
+		if (curr_pos.x < 0 || curr_pos.x >= width || curr_pos.y < 0
+				|| curr_pos.y >= height) {
 			continue;
 		}
 
 		Color curr_color
-				= ((Color*)img.data)[(int)(curr_pos.y * img.width + curr_pos.x)];
+				= ((Color*)img->data)[(int)(curr_pos.y * width + curr_pos.x)];
 
 		if (curr_color.a == 0) {
 			continue;
 		}
 
-		if (is_similar(color, curr_color, diff)) {
-			((Color*)img.data)[(int)(curr_pos.y * img.width + curr_pos.x)].a = 0;
+		if (is_similar(color, curr_color, diff) || curr_color.a < 255) {
+			((Color*)img->data)[(int)(curr_pos.y * width + curr_pos.x)].a = 0;
 			list_append(&stack, ((Vector2) { curr_pos.x, curr_pos.y - 1 })); // top
 			list_append(&stack, ((Vector2) { curr_pos.x + 1, curr_pos.y })); // right
 			list_append(&stack, ((Vector2) { curr_pos.x, curr_pos.y + 1 })); // bottom
 			list_append(&stack, ((Vector2) { curr_pos.x - 1, curr_pos.y })); // left
 		}
 	}
+}
+
+void erode_image(Image* img)
+{
+	// Create a new array to store the eroded image
+	int width = img->width;
+	int height = img->height;
+	Color* pixels = (Color*)img->data;
+	Color* eroded_pixels = (Color*)malloc(width * height * sizeof(Color));
+
+	int kernel_width = 3;
+	int kernel_height = 3;
+
+	int kernel[9] = {
+		0, 1, 0,
+		1, 1, 1,
+		0, 1, 0,
+	};
+
+	if (!eroded_pixels) {
+		printf("Error allocating memory for eroded image\n");
+		return;
+	}
+
+	// Copy the original image to the eroded image initially
+	for (int i = 0; i < width * height; i++) {
+		eroded_pixels[i] = pixels[i];
+	}
+
+	int pad_w = kernel_width / 2;
+	int pad_h = kernel_height / 2;
+
+	for (int y = pad_h; y < height - pad_h; y++) {
+		for (int x = pad_w; x < width - pad_w; x++) {
+			int erode = 0;
+
+			for (int ky = 0; ky < kernel_height; ky++) {
+				for (int kx = 0; kx < kernel_width; kx++) {
+					if (kernel[ky * kernel_width + kx] == 1) {
+						int neighbor_x = x + kx - pad_w;
+						int neighbor_y = y + ky - pad_h;
+						Color neighbor = pixels[neighbor_y * width + neighbor_x];
+
+						if (neighbor.a == 0) {
+							erode = 1;
+							break;
+						}
+					}
+				}
+				if (erode)
+					break;
+			}
+
+			if (erode) {
+				eroded_pixels[y * width + x].a = 0;
+			}
+		}
+	}
+
+	// Copy the eroded image back to the original image array
+	for (int i = 0; i < width * height; i++) {
+		pixels[i] = eroded_pixels[i];
+	}
+
+	// Free the memory allocated for the eroded image
+	free(eroded_pixels);
 }
 
 void handle_color_removal(void)
@@ -1219,15 +1382,12 @@ void handle_color_removal(void)
 								img.size.x * scale, img.size.y * scale })) {
 			if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
 				Vector2 rel_pos;
-				rel_pos.x = (int)to_true_img_x(img, pos.x);
-				rel_pos.y = (int)to_true_img_y(img, pos.y);
+				rel_pos.x = (int)to_true_img_x(i_selected_image, pos.x);
+				rel_pos.y = (int)to_true_img_y(i_selected_image, pos.y);
 
 				Image tmp = LoadImageFromTexture(img.texture);
-				flood_remove(tmp, rel_pos, 30);
-				ImageAlphaClear(&tmp, BLANK, 20);
-
+				flood_remove(&tmp, rel_pos, 30);
 				images.items[i_selected_image].texture = LoadTextureFromImage(tmp);
-
 				UnloadImage(tmp);
 			}
 		} else {
@@ -1254,14 +1414,163 @@ void hatori_print_image(Hatori_Image img)
 	printf("\tformat: %d\n", img.texture.format);
 }
 
-float to_true_img_x(Hatori_Image img, float x)
+float to_true_img_x(U64 i, float x)
 {
-	return ((x - to_screen_x(img.pos.x)) / scale)
-			/ (img.size.x / img.texture.width);
+	return ((x - to_screen_x(images.items[i].pos.x)) / scale)
+			/ (images.items[i].size.x / images.items[i].texture.width);
 }
 
-float to_true_img_y(Hatori_Image img, float y)
+float to_true_img_y(U64 i, float y)
 {
-	return ((y - to_screen_y(img.pos.y)) / scale)
-			/ (img.size.y / img.texture.height);
+	return ((y - to_screen_y(images.items[i].pos.y)) / scale)
+			/ (images.items[i].size.y / images.items[i].texture.height);
+}
+
+Hatori_Text create_text()
+{
+	Hatori_Text txt = { 0 };
+	list_init(&txt.text, 100);
+	memset(txt.text.items, 0, 100);
+	strcpy(txt.text.items, "Enter Text");
+	txt.text.count = strlen("Enter Text");
+	txt.pos.x = GetScreenWidth() / 2.0;
+	txt.pos.y = GetScreenHeight() / 2.0;
+	txt.font_size = 50;
+	txt.spacing = 2;
+	return txt;
+}
+
+void handle_input_texts()
+{
+	Vector2 pos = GetMousePosition();
+	int selected = i_selected_text;
+
+	if (i_selected_text != -1) {
+		Hatori_Text txt = texts.items[i_selected_text];
+		if ((IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE))
+				&& texts.items[i_selected_text].text.count > 0) {
+			texts.items[i_selected_text].text.count--;
+			texts.items[i_selected_text]
+					.text.items[texts.items[i_selected_text].text.count]
+					= '\0';
+			return;
+		}
+		if (IsKeyPressed(KEY_ENTER)) {
+			list_append(&texts.items[i_selected_text].text, '\n');
+			return;
+		}
+		char key = GetCharPressed();
+		if (key != 0 && texts.items[i_selected_text].text.count < 100) {
+			list_append(&texts.items[i_selected_text].text, key);
+		}
+	}
+
+	for (int i = texts.count - 1; i >= 0; --i) {
+		Hatori_Text txt = texts.items[i];
+		if (CheckCollisionPointRec(pos, get_text_resizer_rect(texts.items[i]))) {
+			if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+				selected = i;
+				prev_cursor_x = cursor_x;
+				prev_cursor_y = cursor_y;
+				mode = MOVE_OBJECT_MODE;
+				break;
+			} else if (i_selected_text == i && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+				selected = i;
+				mode = MOVE_OBJECT_MODE;
+				break;
+			} else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+				selected = i;
+				mode = SELECTION_MODE;
+				break;
+			}
+		} else {
+			if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)
+					|| IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+				selected = -1;
+			}
+		}
+	}
+	i_selected_text = selected;
+}
+
+void update_texts(void)
+{
+	if (i_selected_text != -1 && mode == MOVE_OBJECT_MODE) {
+		texts.items[i_selected_text].pos.x += (cursor_x - prev_cursor_x) / scale;
+		texts.items[i_selected_text].pos.y += (cursor_y - prev_cursor_y) / scale;
+		prev_cursor_x = cursor_x;
+		prev_cursor_y = cursor_y;
+	}
+	for (int i = texts.count - 1; i >= 0; --i) {
+		texts.items[i].size = MeasureTextEx(anton_font, texts.items[i].text.items,
+				(float)texts.items[i].font_size * scale, texts.items[i].spacing);
+	}
+}
+
+void draw_texts(void)
+{
+	for (int i = texts.count - 1; i >= 0; --i) {
+		Hatori_Text txt = texts.items[i];
+		DrawTextEx(anton_font, txt.text.items, to_screen(txt.pos),
+				txt.font_size * scale, txt.spacing, WHITE);
+	}
+}
+
+Rectangle get_image_resizer_rect(Hatori_Image img)
+{
+	Rectangle rect = (Rectangle) {
+		to_screen_x(img.pos.x) - resizer.padding - resizer.side / 2.0,
+		to_screen_y(img.pos.y) - resizer.padding - resizer.side / 2.0,
+		img.size.x * scale + 2 * resizer.padding + resizer.side,
+		img.size.y * scale + 2 * resizer.padding + resizer.side,
+	};
+	return rect;
+}
+
+Rectangle get_text_resizer_rect(Hatori_Text text)
+{
+	Rectangle rect = (Rectangle) {
+		to_screen_x(text.pos.x) - resizer.padding - resizer.side / 2.0,
+		to_screen_y(text.pos.y) - resizer.padding - resizer.side / 2.0,
+		text.size.x + 2 * resizer.padding + resizer.side,
+		text.size.y + 2 * resizer.padding + resizer.side,
+	};
+	return rect;
+}
+
+void normalize_z(void)
+{
+	if (i_selected_text >= i_selected_image) {
+		i_selected_image = -1;
+	}
+	if (i_selected_image > i_selected_text) {
+		i_selected_text = -1;
+	}
+}
+
+void draw_scale(void)
+{
+	char buf[10];
+	sprintf(buf, "%.0f%%", scale * 100);
+	int font_size = 20;
+	int padding = 10;
+	int spacing = 2;
+	Vector2 pos = { top_controls.pos.x + top_controls.size.x + 10,
+		top_controls.pos.y + top_controls.size.y / 2.0 - font_size / 2.0 };
+	pos.x -= padding;
+	pos.y -= padding;
+	Vector2 size = MeasureTextEx(anton_font, buf, font_size, spacing);
+	size.x += 2 * padding;
+	size.y += 2 * padding;
+	DrawRectangleV(pos, size, HATORI_PRIMARY);
+	pos.x += padding;
+	pos.y += padding;
+	DrawTextEx(anton_font, buf, pos, font_size, spacing, WHITE);
+}
+
+Rectangle get_image_rect(U64 i)
+{
+	return (Rectangle) { to_screen_x(images.items[i].pos.x),
+		to_screen_y(images.items[i].pos.y), images.items[i].size.x * scale,
+		images.items[i].size.y * scale };
 }
