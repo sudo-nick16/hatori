@@ -102,6 +102,8 @@ typedef struct Hatori_Text {
 	int spacing;
 	int font_size;
 	bool wrap;
+
+	int z;
 } Hatori_Text;
 
 Hatori_Controls create_top_controls(void);
@@ -171,6 +173,7 @@ Rectangle get_text_resizer_rect(Hatori_Text text);
 bool is_similar(Color c1, Color c2, int diff);
 void flood_remove(Image* img, Vector2 pos, int diff);
 void erode_image(Image* img);
+void apply_dilation(Image* img);
 
 void hatori_print_image(Hatori_Image img);
 
@@ -783,6 +786,8 @@ void back_on_click_image(void)
 			return;
 		}
 		Hatori_Image tmp = images.items[i_selected_image - 1];
+		images.items[i_selected_text].z = tmp.z;
+		tmp.z++;
 		images.items[i_selected_image - 1] = images.items[i_selected_image];
 		images.items[i_selected_image] = tmp;
 		img_controls.selected = -1;
@@ -798,6 +803,8 @@ void front_on_click_image(void)
 			return;
 		}
 		Hatori_Image tmp = images.items[i_selected_image + 1];
+		images.items[i_selected_text].z = tmp.z;
+		tmp.z--;
 		images.items[i_selected_image + 1] = images.items[i_selected_image];
 		images.items[i_selected_image] = tmp;
 		img_controls.selected = -1;
@@ -822,25 +829,33 @@ void dig_on_click_image(void)
 void reset_on_click_image(void)
 {
 	if (i_selected_image != -1) {
+		Hatori_Image img = images.items[i_selected_image];
+		Image tmp = LoadImageFromTexture(img.texture);
+		apply_dilation(&tmp);
+		images.items[i_selected_image].texture = LoadTextureFromImage(tmp);
+		UnloadImage(tmp);
+
 		img_controls.selected = -1;
 	}
 }
 
 void save_on_click_image(void)
 {
-	if (i_selected_image != 1) {
+	if (i_selected_image != -1) {
 		Image img = LoadImageFromTexture(images.items[i_selected_image].texture);
 		ExportImage(img, "hatori_image.png");
+
 		img_controls.selected = -1;
 	}
 }
 
 void copy_on_click_image(void)
 {
-	if (i_selected_image != 1) {
+	if (i_selected_image != -1) {
 		Hatori_Image tmp = images.items[i_selected_image];
 		tmp.pos.x += 10 * scale;
 		tmp.pos.y += 10 * scale;
+		tmp.z = z++;
 		list_append(&images, tmp);
 		img_controls.selected = -1;
 	}
@@ -971,6 +986,10 @@ void handle_shortcuts(void)
 			i_selected_image = -1;
 			img_controls.selected = -1;
 		}
+	}
+	if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_V)) {
+		const char* buf = GetClipboardText();
+		printf("buf: %s\n", buf);
 	}
 }
 
@@ -1306,6 +1325,46 @@ void flood_remove(Image* img, Vector2 pos, int diff)
 	}
 }
 
+void apply_dilation(Image* img)
+{
+	int width = img->width;
+	int height = img->height;
+	int kernel_size = 3; // 3x3 kernel
+	int half_kernel = kernel_size / 2;
+	Color* out = (Color*)malloc(width * height * sizeof(Color));
+	Color* pixels = (Color*)img->data;
+	int pad = kernel_size / 2;
+
+	for (int y = pad; y < height; ++y) {
+		for (int x = pad; x < width; ++x) {
+			Color max_pixel = { 0, 0, 0, 0 }; // Start with a black pixel
+
+			// Loop over the 3x3 kernel
+			for (int ky = -half_kernel; ky <= half_kernel; ++ky) {
+				for (int kx = -half_kernel; kx <= half_kernel; ++kx) {
+					Color neighbor = pixels[(y + ky) * width + x + kx];
+
+					// Choose the brightest pixel in the kernel (dilation effect)
+					if (neighbor.r > max_pixel.r)
+						max_pixel.r = neighbor.r;
+					if (neighbor.g > max_pixel.g)
+						max_pixel.g = neighbor.g;
+					if (neighbor.b > max_pixel.b)
+						max_pixel.b = neighbor.b;
+					if (neighbor.a > max_pixel.a)
+						max_pixel.a = neighbor.a;
+				}
+			}
+
+			// Assign the maximum pixel value to the current position
+			out[y * width + x] = max_pixel;
+		}
+	}
+	Color* tmp = img->data;
+	img->data = out;
+	RL_FREE(tmp);
+}
+
 void erode_image(Image* img)
 {
 	// Create a new array to store the eroded image
@@ -1318,9 +1377,15 @@ void erode_image(Image* img)
 	int kernel_height = 3;
 
 	int kernel[9] = {
-		0, 1, 0,
-		1, 1, 1,
-		0, 1, 0,
+		0,
+		1,
+		0,
+		1,
+		1,
+		1,
+		0,
+		1,
+		0,
 	};
 
 	if (!eroded_pixels) {
@@ -1437,6 +1502,7 @@ Hatori_Text create_text()
 	txt.pos.y = GetScreenHeight() / 2.0;
 	txt.font_size = 50;
 	txt.spacing = 2;
+	txt.z = z++;
 	return txt;
 }
 
@@ -1503,7 +1569,8 @@ void update_texts(void)
 	}
 	for (int i = texts.count - 1; i >= 0; --i) {
 		texts.items[i].size = MeasureTextEx(anton_font, texts.items[i].text.items,
-				(float)texts.items[i].font_size * scale, texts.items[i].spacing);
+				(float)texts.items[i].font_size * scale,
+				texts.items[i].spacing * scale);
 	}
 }
 
@@ -1511,8 +1578,38 @@ void draw_texts(void)
 {
 	for (int i = texts.count - 1; i >= 0; --i) {
 		Hatori_Text txt = texts.items[i];
+		int outline_size = 2;
+
+		DrawTextEx(anton_font, txt.text.items,
+				to_screen((Vector2) {
+						txt.pos.x - outline_size,
+						txt.pos.y - outline_size,
+				}),
+				txt.font_size * scale, txt.spacing * scale, RED);
+
+		DrawTextEx(anton_font, txt.text.items,
+				to_screen((Vector2) {
+						txt.pos.x + outline_size,
+						txt.pos.y - outline_size,
+				}),
+				txt.font_size * scale, txt.spacing * scale, RED);
+
+		DrawTextEx(anton_font, txt.text.items,
+				to_screen((Vector2) {
+						txt.pos.x - outline_size,
+						txt.pos.y + outline_size,
+				}),
+				txt.font_size * scale, txt.spacing * scale, RED);
+
+		DrawTextEx(anton_font, txt.text.items,
+				to_screen((Vector2) {
+						txt.pos.x + outline_size,
+						txt.pos.y + outline_size,
+				}),
+				txt.font_size * scale, txt.spacing * scale, RED);
+
 		DrawTextEx(anton_font, txt.text.items, to_screen(txt.pos),
-				txt.font_size * scale, txt.spacing, WHITE);
+				txt.font_size * scale, txt.spacing * scale, WHITE);
 	}
 }
 
@@ -1540,11 +1637,13 @@ Rectangle get_text_resizer_rect(Hatori_Text text)
 
 void normalize_z(void)
 {
-	if (i_selected_text >= i_selected_image) {
-		i_selected_image = -1;
-	}
-	if (i_selected_image > i_selected_text) {
-		i_selected_text = -1;
+	if (i_selected_image != -1 && i_selected_text != -1) {
+		if (texts.items[i_selected_text].z >= images.items[i_selected_image].z) {
+			i_selected_image = -1;
+		}
+		if (images.items[i_selected_image].z > texts.items[i_selected_text].z) {
+			i_selected_text = -1;
+		}
 	}
 }
 
