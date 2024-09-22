@@ -7,3 +7,6 @@
 [ ] Allow rotation - slider at bottom of the image.
 [ ] Split using transparency.
 [ ] Drag based editing.
+
+[ ] Fix text and images z collision.
+[ ] Add ai model for better background removal.
