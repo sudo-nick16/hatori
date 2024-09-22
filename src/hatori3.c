@@ -244,7 +244,7 @@ int main(void)
 
 	resizer.side = 10;
 	resizer.thickness = 2;
-	resizer.padding = 8;
+	resizer.padding = 0;
 	resizer.selected = -1;
 
 	anton_font = LoadFontEx("assets/Anton-Regular.ttf", 200, NULL, 0);
@@ -730,18 +730,22 @@ void vflip_on_click_image(void)
 void back_on_click(void)
 {
 	if (is_image_selected() || is_text_selected()) {
-		if (selected_entity - 1 < 0) {
+		int i = selected_entity - 1;
+		while (i >= 0 && entities.items[i].deleted) {
+			i--;
+		}
+		if (i < 0) {
 			img_controls.selected = -1;
 			text_controls.selected = -1;
 			return;
 		}
-		Hatori_Entity tmp = entities.items[selected_entity - 1];
+		Hatori_Entity tmp = entities.items[i];
 		entities.items[selected_entity].z = tmp.z;
 		tmp.z++;
-		entities.items[selected_entity - 1] = entities.items[selected_entity];
+		entities.items[i] = entities.items[selected_entity];
 		entities.items[selected_entity] = tmp;
 
-		selected_entity -= 1;
+		selected_entity = i;
 		img_controls.selected = -1;
 		text_controls.selected = -1;
 	}
@@ -750,18 +754,22 @@ void back_on_click(void)
 void front_on_click(void)
 {
 	if (is_image_selected() || is_text_selected()) {
-		if (selected_entity + 1 >= entities.count) {
+		int i = selected_entity + 1;
+		while (i < entities.count && entities.items[i].deleted) {
+			i++;
+		}
+		if (i >= entities.count) {
 			img_controls.selected = -1;
 			text_controls.selected = -1;
 			return;
 		}
-		Hatori_Entity tmp = entities.items[selected_entity + 1];
+		Hatori_Entity tmp = entities.items[i];
 		entities.items[selected_entity].z = tmp.z;
 		tmp.z--;
-		entities.items[selected_entity + 1] = entities.items[selected_entity];
+		entities.items[i] = entities.items[selected_entity];
 		entities.items[selected_entity] = tmp;
 
-		selected_entity += 1;
+		selected_entity = i;
 		img_controls.selected = -1;
 		text_controls.selected = -1;
 	}
@@ -1313,15 +1321,12 @@ void flood_remove(Image* img, Vector2 pos, int diff)
 
 void erode_image(Image* img)
 {
-	// Create a new array to store the eroded image
 	int width = img->width;
 	int height = img->height;
 	Color* pixels = (Color*)img->data;
 	Color* eroded_pixels = (Color*)malloc(width * height * sizeof(Color));
-
 	int kernel_width = 3;
 	int kernel_height = 3;
-
 	int kernel[9] = {
 		0,
 		1,
@@ -1333,20 +1338,15 @@ void erode_image(Image* img)
 		1,
 		0,
 	};
-
 	if (!eroded_pixels) {
 		printf("Error allocating memory for eroded image\n");
 		return;
 	}
-
-	// Copy the original image to the eroded image initially
 	for (int i = 0; i < width * height; i++) {
 		eroded_pixels[i] = pixels[i];
 	}
-
 	int pad_w = kernel_width / 2;
 	int pad_h = kernel_height / 2;
-
 	for (int y = pad_h; y < height - pad_h; y++) {
 		for (int x = pad_w; x < width - pad_w; x++) {
 			int erode = 0;
@@ -1367,21 +1367,14 @@ void erode_image(Image* img)
 				if (erode)
 					break;
 			}
-
 			if (erode) {
 				eroded_pixels[y * width + x].a = 0;
 			}
 		}
 	}
-
-	// Copy the eroded image back to the original image array
 	for (int i = 0; i < width * height; i++) {
 		pixels[i] = eroded_pixels[i];
 	}
-
-	// ImageAlphaCrop(img, 0.5f);
-
-	// Free the memory allocated for the eroded image
 	free(eroded_pixels);
 }
 
@@ -1400,7 +1393,6 @@ void handle_color_removal(void)
 
 				Image tmp = LoadImageFromTexture(img.texture);
 				flood_remove(&tmp, rel_pos, 30);
-				ImageAlphaCrop(&tmp, 0.5f);
 				entities.items[selected_entity].entity.image.texture
 						= LoadTextureFromImage(tmp);
 				UnloadImage(tmp);

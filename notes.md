@@ -3,6 +3,7 @@
 [x] Allow resizing - add resizing boxes in the corner.
 [x] Add text support.
 [x] Selected image only erasure.
+[x] Compositing into entities.
 [ ] Per image erasure.
 [ ] Allow rotation - slider at bottom of the image.
 [ ] Split using transparency.
