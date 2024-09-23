@@ -246,7 +246,7 @@ int main(void)
 
 	resizer.side = 10;
 	resizer.thickness = 2;
-	resizer.padding = 0;
+	resizer.padding = 5;
 	resizer.selected = -1;
 
 	anton_font = LoadFontEx("assets/Anton-Regular.ttf", 200, NULL, 0);
@@ -583,7 +583,9 @@ void handle_drop_images(void)
 				continue;
 			}
 			Hatori_Image new_img = { 0 };
-			new_img.pos = GetMousePosition();
+			Vector2 pos = GetMousePosition();
+			new_img.pos.x = to_virtual_x(pos.x);
+			new_img.pos.y = to_virtual_y(pos.y);
 			new_img.size.x = texture.width;
 			new_img.size.y = texture.height;
 			new_img.texture = texture;
@@ -632,8 +634,8 @@ void take_screenshot_rect(const char* filepath, Rectangle rect)
 	Texture2D texture = LoadTextureFromImage(image);
 	Hatori_Image img = { 0 };
 	img.texture = texture;
-	img.pos.x = rect.x + 40;
-	img.pos.y = rect.y + 40;
+	img.pos.x = to_virtual_x(rect.x) + 40;
+	img.pos.y = to_virtual_y(rect.y) + 40;
 	img.size.x = (float)texture.width / scale;
 	img.size.y = (float)texture.height / scale;
 	img.original = image;
@@ -1436,8 +1438,8 @@ Hatori_Text create_text()
 	memset(txt.text.items, 0, 100);
 	strcpy(txt.text.items, "Enter Text");
 	txt.text.count = strlen("Enter Text");
-	txt.pos.x = GetScreenWidth() / 2.0;
-	txt.pos.y = GetScreenHeight() / 2.0;
+	txt.pos.x = to_virtual_x(GetScreenWidth() / 2.0);
+	txt.pos.y = to_virtual_y(GetScreenHeight() / 2.0);
 	txt.font_size = 50;
 	txt.spacing = 2;
 	return txt;
