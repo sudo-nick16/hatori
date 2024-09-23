@@ -50,6 +50,8 @@ typedef struct Hatori_Image {
 	Vector2 pos;
 	Vector2 size;
 
+	Image original;
+	Image current;
 	Texture2D texture;
 } Hatori_Image;
 
@@ -577,21 +579,17 @@ void handle_drop_images(void)
 			Image img = LoadImage(dropped_files.paths[i]);
 			ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
 			Texture2D texture = LoadTextureFromImage(img);
-			UnloadImage(img);
 			if (!IsTextureReady(texture)) {
 				continue;
 			}
-			// list_append(&images,
-			// 		((Hatori_Image) {
-			// 				.pos = GetMousePosition(),
-			// 				.size = (Vector2) { (float)texture.width, (float)texture.height
-			// }, 				.texture = texture, 				.z = z++,
-			// 		}));
 			Hatori_Image new_img = { 0 };
 			new_img.pos = GetMousePosition();
 			new_img.size.x = texture.width;
 			new_img.size.y = texture.height;
 			new_img.texture = texture;
+			new_img.original = img;
+			new_img.current = ImageCopy(img);
+
 			Hatori_Entity e = { 0 };
 			e.z = z++;
 			e.type = ENTITY_IMAGE;
@@ -638,6 +636,8 @@ void take_screenshot_rect(const char* filepath, Rectangle rect)
 	img.pos.y = rect.y + 40;
 	img.size.x = (float)texture.width / scale;
 	img.size.y = (float)texture.height / scale;
+	img.original = image;
+	img.current = ImageCopy(image);
 
 	Hatori_Entity e = { 0 };
 	e.type = ENTITY_IMAGE;
@@ -704,12 +704,17 @@ void bin_on_click(void)
 void hflip_on_click_image(void)
 {
 	if (is_image_selected()) {
-		Image img = LoadImageFromTexture(
-				entities.items[selected_entity].entity.image.texture);
-		ImageFlipHorizontal(&img);
-		entities.items[selected_entity].entity.image.texture
-				= LoadTextureFromImage(img);
-		RL_FREE(img.data);
+		Hatori_Image image = entities.items[selected_entity].entity.image;
+		uint32_t* ptr = (uint32_t*)image.current.data;
+		for (int y = 0; y < image.current.height; y++) {
+			for (int x = 0; x < image.current.width / 2; x++) {
+				uint32_t backup = ptr[y * image.current.width + x];
+				ptr[y * image.current.width + x]
+						= ptr[y * image.current.width + (image.current.width - 1 - x)];
+				ptr[y * image.current.width + (image.current.width - 1 - x)] = backup;
+			}
+		}
+		UpdateTexture(image.texture, image.current.data);
 		img_controls.selected = -1;
 	}
 }
@@ -717,12 +722,10 @@ void hflip_on_click_image(void)
 void vflip_on_click_image(void)
 {
 	if (is_image_selected()) {
-		Image img = LoadImageFromTexture(
-				entities.items[selected_entity].entity.image.texture);
-		ImageFlipVertical(&img);
-		entities.items[selected_entity].entity.image.texture
-				= LoadTextureFromImage(img);
-		UnloadImage(img);
+		Hatori_Image image = entities.items[selected_entity].entity.image;
+		ImageFlipVertical(&image.current);
+		entities.items[selected_entity].entity.image.current = image.current;
+		UpdateTexture(image.texture, image.current.data);
 		img_controls.selected = -1;
 	}
 }
@@ -780,13 +783,10 @@ void fill_on_click_image(void) { }
 void dig_on_click_image(void)
 {
 	if (is_image_selected()) {
-		Image tmp = LoadImageFromTexture(
-				entities.items[selected_entity].entity.image.texture);
-		erode_image(&tmp);
-		entities.items[selected_entity].entity.image.texture
-				= LoadTextureFromImage(tmp);
-		UnloadImage(tmp);
-
+		Hatori_Image image = entities.items[selected_entity].entity.image;
+		erode_image(&image.current);
+		entities.items[selected_entity].entity.image.current = image.current;
+		UpdateTexture(image.texture, image.current.data);
 		img_controls.selected = -1;
 	}
 }
@@ -794,7 +794,11 @@ void dig_on_click_image(void)
 void reset_on_click_image(void)
 {
 	if (is_image_selected()) {
-
+		UnloadImage(entities.items[selected_entity].entity.image.current);
+		entities.items[selected_entity].entity.image.current
+				= ImageCopy(entities.items[selected_entity].entity.image.original);
+		UpdateTexture(entities.items[selected_entity].entity.image.texture,
+				entities.items[selected_entity].entity.image.current.data);
 		img_controls.selected = -1;
 	}
 }
@@ -1057,21 +1061,17 @@ void handle_input_erasure(void)
 	// TODO: very bad design i think
 	Vector2 pos = GetMousePosition();
 	if (mode == ERASURE_MODE) {
+		printf("ersure\n");
 		if (is_image_selected()) {
 			Hatori_Image img = entities.items[selected_entity].entity.image;
 			if (CheckCollisionCircleRec(pos, erasure_thickness, img_to_rect(img))) {
 				if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)
 						|| IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-					Image tmp = LoadImageFromTexture(img.texture);
-
-					ImageDrawCircle(&tmp, to_true_img_x(img, pos.x),
+					ImageDrawCircle(&img.current, to_true_img_x(img, pos.x),
 							to_true_img_y(img, pos.y),
 							(erasure_thickness / scale) / (img.size.x / img.texture.width),
 							BLANK);
-
-					entities.items[selected_entity].entity.image.texture
-							= LoadTextureFromImage(tmp);
-					UnloadImage(tmp);
+					UpdateTexture(img.texture, img.current.data);
 				}
 			}
 		}
@@ -1324,7 +1324,11 @@ void erode_image(Image* img)
 	int width = img->width;
 	int height = img->height;
 	Color* pixels = (Color*)img->data;
-	Color* eroded_pixels = (Color*)malloc(width * height * sizeof(Color));
+	Color* eroded_pixels = LoadImageColors(*img);
+	if (!eroded_pixels) {
+		printf("Error allocating memory for eroded image\n");
+		return;
+	}
 	int kernel_width = 3;
 	int kernel_height = 3;
 	int kernel[9] = {
@@ -1338,10 +1342,6 @@ void erode_image(Image* img)
 		1,
 		0,
 	};
-	if (!eroded_pixels) {
-		printf("Error allocating memory for eroded image\n");
-		return;
-	}
 	for (int i = 0; i < width * height; i++) {
 		eroded_pixels[i] = pixels[i];
 	}
@@ -1375,7 +1375,7 @@ void erode_image(Image* img)
 	for (int i = 0; i < width * height; i++) {
 		pixels[i] = eroded_pixels[i];
 	}
-	free(eroded_pixels);
+	RL_FREE(eroded_pixels);
 }
 
 void handle_color_removal(void)
@@ -1391,11 +1391,8 @@ void handle_color_removal(void)
 				rel_pos.x = (int)to_true_img_x(img, pos.x);
 				rel_pos.y = (int)to_true_img_y(img, pos.y);
 
-				Image tmp = LoadImageFromTexture(img.texture);
-				flood_remove(&tmp, rel_pos, 30);
-				entities.items[selected_entity].entity.image.texture
-						= LoadTextureFromImage(tmp);
-				UnloadImage(tmp);
+				flood_remove(&img.current, rel_pos, 30);
+				UpdateTexture(img.texture, img.current.data);
 			}
 		} else {
 			if (!CheckCollisionPointRec(pos,
@@ -1544,6 +1541,9 @@ void handle_mouse_input_entities(void)
 {
 	Vector2 pos = GetMousePosition();
 	int selected = selected_entity;
+	if (mode == ERASURE_MODE) {
+		return;
+	}
 	for (int i = entities.count - 1; i >= 0; --i) {
 		if (entities.items[i].deleted) {
 			continue;
@@ -1571,11 +1571,10 @@ void handle_mouse_input_entities(void)
 				selected = selected_entity;
 			} else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)
 					|| IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-				printf("clicked outside\n");
 				selected = -1;
 				img_controls.selected = -1;
 				resizer.selected = -1;
-				mode = SELECTION_MODE;
+				// mode = SELECTION_MODE;
 			}
 		}
 	}
