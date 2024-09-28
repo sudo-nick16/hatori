@@ -1,4 +1,4 @@
-#include <GL/gl.h>
+#include <GLES3/gl3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -207,6 +207,8 @@ void draw_entities(void);
 bool is_image_selected(void);
 bool is_text_selected(void);
 
+extern U8* get_image_data(void);
+
 Mode mode;
 float offset_x;
 float offset_y;
@@ -232,6 +234,7 @@ int selected_entity = -1;
 
 int main(void)
 {
+
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 	SetConfigFlags(FLAG_MSAA_4X_HINT);
 
@@ -262,13 +265,16 @@ int main(void)
 	SetTargetFPS(60);
 
 	while (!WindowShouldClose()) {
-		DrawFPS(0, 0);
-
 		Vector2 pos = GetMousePosition();
 		cursor_x = pos.x;
 		cursor_y = pos.y;
 
+#if !defined(PLATFORM_WEB)
 		handle_input_screenshot();
+		handle_input_controls(&text_controls);
+		handle_input_controls(&img_controls);
+#endif
+
 		handle_drop_images();
 
 		update_top_controls();
@@ -280,8 +286,7 @@ int main(void)
 		handle_input_lines();
 		handle_panning();
 		handle_scroll();
-		handle_input_controls(&img_controls);
-		handle_input_controls(&text_controls);
+
 		handle_mouse_input_entities();
 		handle_key_input_entities();
 
@@ -294,6 +299,7 @@ int main(void)
 
 		BeginDrawing();
 		ClearBackground(BLANK);
+		DrawFPS(0, 0);
 
 		draw_entities();
 		draw_lines();
@@ -308,6 +314,14 @@ int main(void)
 
 		draw_screenshot();
 		draw_scale();
+
+#if defined(PLATFORM_WEB)
+		rlDrawRenderBatchActive();
+		handle_input_screenshot();
+		handle_input_controls(&text_controls);
+		handle_input_controls(&img_controls);
+#endif
+
 		EndDrawing();
 	}
 
@@ -607,14 +621,28 @@ void take_screenshot_rect(const char* filepath, Rectangle rect)
 	Vector2 win_scale = GetWindowScaleDPI();
 	int width = rect.width * win_scale.x;
 	int height = rect.height * win_scale.y;
-	rect.x *= win_scale.x;
-	rect.y = (GetScreenHeight() - rect.y - height) * win_scale.y;
+	int x = rect.x * win_scale.x;
+	int y = (GetScreenHeight() - rect.y - height) * win_scale.y;
 
 	unsigned char* screenData
 			= (unsigned char*)calloc(width * height * 4, sizeof(unsigned char));
 
-	glReadPixels(
-			rect.x, rect.y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, screenData);
+	glReadPixels(x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, screenData);
+
+	bool is_empty = true;
+
+	for (int i = 0; i < width * height * 4; ++i) {
+		if (screenData[i] != 0) {
+			is_empty = false;
+			break;
+		}
+	}
+
+	if (is_empty) {
+		printf("why is screen data empty?\n");
+		RL_FREE(screenData);
+		return;
+	}
 
 	unsigned char* imgData
 			= (unsigned char*)malloc(height * width * 4 * sizeof(unsigned char));
@@ -626,20 +654,25 @@ void take_screenshot_rect(const char* filepath, Rectangle rect)
 		}
 	}
 
-	RL_FREE(screenData);
-
-	Image image = { imgData, (int)((float)width), (int)((float)height), 1,
-		PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+	Image image = { 0 };
+	image.data = imgData;
+	image.width = width;
+	image.height = height;
+	image.mipmaps = 1;
+	image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
 
 	Texture2D texture = LoadTextureFromImage(image);
-	Hatori_Image img = { 0 };
-	img.texture = texture;
+
+	Hatori_Image img;
 	img.pos.x = to_virtual_x(rect.x) + 40;
 	img.pos.y = to_virtual_y(rect.y) + 40;
 	img.size.x = (float)texture.width / scale;
 	img.size.y = (float)texture.height / scale;
 	img.original = image;
-	img.current = ImageCopy(image);
+	img.current = ImageCopy(img.original);
+	img.texture = texture;
+
+	RL_FREE(screenData);
 
 	Hatori_Entity e = { 0 };
 	e.type = ENTITY_IMAGE;
@@ -653,20 +686,20 @@ void take_screenshot_rect(const char* filepath, Rectangle rect)
 			path, TextFormat("%s/%s", GetWorkingDirectory(), GetFileName(filepath)));
 
 	ExportImage(image, path);
-
-	RL_FREE(imgData);
 }
 
 void handle_input_screenshot(void)
 {
 	if (mode == SCREENSHOT_MODE) {
-		if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+		if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)
+				&& !CheckCollisionPointRec(GetMousePosition(),
+						(Rectangle) { top_controls.pos.x, top_controls.pos.y,
+								top_controls.size.x, top_controls.size.y })) {
 			prev_cursor_x = cursor_x;
 			prev_cursor_y = cursor_y;
 			mode = DRAW_SCREENSHOT_MODE;
 		}
-	}
-	if (mode == DRAW_SCREENSHOT_MODE) {
+	} else if (mode == DRAW_SCREENSHOT_MODE) {
 		if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
 			char filename[15] = { 0 };
 			sprintf(filename, "%ld.png", time(NULL));
@@ -696,6 +729,10 @@ void draw_screenshot(void)
 void bin_on_click(void)
 {
 	if (is_image_selected() || is_text_selected()) {
+		if (is_image_selected()) {
+			UnloadImage(entities.items[selected_entity].entity.image.original);
+			UnloadImage(entities.items[selected_entity].entity.image.current);
+		}
 		entities.items[selected_entity].deleted = true;
 		selected_entity = -1;
 		img_controls.selected = -1;
@@ -815,8 +852,7 @@ void save_on_click(void)
 		pos.y = to_screen_y(img.pos.y);
 		size.x = img.size.x * scale;
 		size.y = img.size.y * scale;
-	}
-	if (is_text_selected()) {
+	} else if (is_text_selected()) {
 		Hatori_Text txt = entities.items[selected_entity].entity.text;
 		pos.x = to_screen_x(txt.pos.x);
 		pos.y = to_screen_y(txt.pos.y);
@@ -828,15 +864,20 @@ void save_on_click(void)
 	rect.y = pos.y;
 	rect.width = size.x;
 	rect.height = size.y;
+
 	take_screenshot_rect("hatori_image.png", rect);
 
 	img_controls.selected = -1;
+	text_controls.selected = -1;
 }
 
 void copy_on_click(void)
 {
 	if (is_image_selected()) {
 		Hatori_Image new_img = entities.items[selected_entity].entity.image;
+		new_img.original = ImageCopy(new_img.current);
+		new_img.current = ImageCopy(new_img.current);
+		new_img.texture = LoadTextureFromImage(new_img.current);
 		new_img.pos.x += 10 * scale;
 		new_img.pos.y += 10 * scale;
 		Hatori_Entity e = { 0 };
@@ -996,6 +1037,7 @@ void handle_shortcuts(void)
 		const char* buf = GetClipboardText();
 		printf("buf: %s\n", buf);
 	}
+	if (IsKeyPressed(KEY_T)) { }
 }
 
 void handle_input_slider(Hatori_Slider* slider)
@@ -1063,7 +1105,6 @@ void handle_input_erasure(void)
 	// TODO: very bad design i think
 	Vector2 pos = GetMousePosition();
 	if (mode == ERASURE_MODE) {
-		printf("ersure\n");
 		if (is_image_selected()) {
 			Hatori_Image img = entities.items[selected_entity].entity.image;
 			if (CheckCollisionCircleRec(pos, erasure_thickness, img_to_rect(img))) {
@@ -1096,11 +1137,6 @@ void handle_input_erasure(void)
 void handle_cursor(void)
 {
 	int CURSOR = MOUSE_CURSOR_DEFAULT;
-	if (mode == ERASURE_MODE) {
-		HideCursor();
-	} else {
-		ShowCursor();
-	}
 	if (mode == SCREENSHOT_MODE || mode == DRAW_SCREENSHOT_MODE) {
 		CURSOR = MOUSE_CURSOR_CROSSHAIR;
 	}
@@ -1385,18 +1421,17 @@ void handle_color_removal(void)
 	if (is_image_selected() && img_controls.selected == 5) {
 		Vector2 pos = GetMousePosition();
 		Hatori_Image img = entities.items[selected_entity].entity.image;
-		if (CheckCollisionPointRec(pos,
-						(Rectangle) { to_screen_x(img.pos.x), to_screen_y(img.pos.y),
-								img.size.x * scale, img.size.y * scale })) {
-			if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-				Vector2 rel_pos;
-				rel_pos.x = (int)to_true_img_x(img, pos.x);
-				rel_pos.y = (int)to_true_img_y(img, pos.y);
+		if (CheckCollisionPointRec(pos, get_image_resizer_rect(img))
+				&& IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+			printf("clicked bruda\n");
+			Vector2 rel_pos;
+			rel_pos.x = (int)to_true_img_x(img, pos.x);
+			rel_pos.y = (int)to_true_img_y(img, pos.y);
 
-				flood_remove(&img.current, rel_pos, 30);
-				UpdateTexture(img.texture, img.current.data);
-			}
+			flood_remove(&img.current, rel_pos, 30);
+			UpdateTexture(img.texture, img.current.data);
 		} else {
+			printf("hair removal not collison\n");
 			if (!CheckCollisionPointRec(pos,
 							(Rectangle) { img_controls.pos.x, img_controls.pos.y,
 									img_controls.size.x, img_controls.size.y })
@@ -1417,6 +1452,8 @@ void hatori_print_image(Hatori_Image img)
 	printf("\theight: %d\n", img.texture.height);
 	printf("\tmipmaps: %d\n", img.texture.mipmaps);
 	printf("\tformat: %d\n", img.texture.format);
+	printf("original: %p\n", img.original);
+	printf("current: %p\n", img.current);
 }
 
 float to_true_img_x(Hatori_Image img, float x)
@@ -1543,7 +1580,8 @@ void handle_mouse_input_entities(void)
 {
 	Vector2 pos = GetMousePosition();
 	int selected = selected_entity;
-	if (mode == ERASURE_MODE) {
+	if (mode == ERASURE_MODE || mode == SCREENSHOT_MODE
+			|| mode == DRAW_SCREENSHOT_MODE) {
 		return;
 	}
 	for (int i = entities.count - 1; i >= 0; --i) {
@@ -1574,11 +1612,16 @@ void handle_mouse_input_entities(void)
 			} else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)
 					|| IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
 				selected = -1;
-				img_controls.selected = -1;
-				resizer.selected = -1;
+				// img_controls.selected = -1;
+				// resizer.selected = -1;
 				// mode = SELECTION_MODE;
 			}
 		}
+	}
+	if (selected == -1) {
+		img_controls.selected = -1;
+		resizer.selected = -1;
+		mode = SELECTION_MODE;
 	}
 	selected_entity = selected;
 }

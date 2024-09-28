@@ -3,10 +3,12 @@
 if [ "$1" = "build-web" ]; then
 	echo "building the app for web"
 	mkdir -p build
-	emcc -O3 -o build/index.html src/hatori3.c -I./src/external/raylib/src -L./lib -l:libraylibweb.a \
-	-s USE_GLFW=3 -s ASYNCIFY --shell-file=hatori.html -s LINKABLE=1 -s EXPORT_ALL=1 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
-	-O0	-sALLOW_MEMORY_GROWTH -s "EXPORTED_RUNTIME_METHODS=['ccall']" \
-	--preload-file assets -sFORCE_FILESYSTEM
+	# -s LINKABLE=1 -s EXPORT_ALL=1 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
+	emcc -DPLATFORM_WEB=1 -Os -o build/index.html src/hatori3.c -I./src/external/raylib/src -L./lib -l:libraylibweb.a \
+	-s USE_WEBGL2=1 -s ASYNCIFY -sFULL_ES3 -s USE_GLFW=3  --shell-file=hatori.html \
+	-s ALLOW_MEMORY_GROWTH -s "EXPORTED_RUNTIME_METHODS=['ccall']" \
+	--preload-file assets -s FORCE_FILESYSTEM=1 \
+	 -s MINIFY_HTML=0
 	exit 0
 fi
 
@@ -25,11 +27,11 @@ if [ "$1" = "raylib-web" ]; then
 	echo "building raylib for web .."
 	mkdir -p lib
 	cd src/external/raylib/src 
-	emcc -DGRAPHICS_API_OPENGL_ES2 -DPLATFORM_WEB -Os -c rcore.c
-	emcc -DGRAPHICS_API_OPENGL_ES2 -DPLATFORM_WEB -Os -c rshapes.c
-	emcc -DGRAPHICS_API_OPENGL_ES2 -DPLATFORM_WEB -Os -c rtextures.c
-	emcc -DGRAPHICS_API_OPENGL_ES2 -DPLATFORM_WEB -Os -c rtext.c
-	emcc -DGRAPHICS_API_OPENGL_ES2 -DPLATFORM_WEB -Os -c rmodels.c
+	emcc -DGRAPHICS_API_OPENGL_ES3 -DPLATFORM_WEB -Os -c rcore.c
+	emcc -DGRAPHICS_API_OPENGL_ES3 -DPLATFORM_WEB -Os -c rshapes.c
+	emcc -DGRAPHICS_API_OPENGL_ES3 -DPLATFORM_WEB -Os -c rtextures.c
+	emcc -DGRAPHICS_API_OPENGL_ES3 -DPLATFORM_WEB -Os -c rtext.c
+	emcc -DGRAPHICS_API_OPENGL_ES3 -DPLATFORM_WEB -Os -c rmodels.c
 	emcc -DPLATFORM_WEB -Os -c utils.c
 	emcc -DPLATFORM_WEB -Os -c raudio.c
 	emar rcs ../../../../lib/libraylibweb.a rcore.o rshapes.o rtextures.o rtext.o rmodels.o utils.o raudio.o
