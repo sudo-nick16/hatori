@@ -150,6 +150,9 @@
 #define RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR 3
 #define RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT 4
 #define RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2 5
+#define RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEIDS 6
+#define RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS 7
+#define RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES 8
 
 // Default shader vertex attribute names to set location points
 // NOTE: When a new shader is loaded, the following locations are tried to be
@@ -240,7 +243,7 @@
 // Selected desired font fileformats to be supported for loading
 #define SUPPORT_FILEFORMAT_TTF 1
 #define SUPPORT_FILEFORMAT_FNT 1
-#define SUPPORT_FILEFORMAT_BDF 1
+// #define SUPPORT_FILEFORMAT_BDF          1
 
 // Support text management functions
 // If not defined, still some functions are supported: TextLength(),
@@ -290,7 +293,7 @@
 #define SUPPORT_FILEFORMAT_OGG 1
 #define SUPPORT_FILEFORMAT_MP3 1
 #define SUPPORT_FILEFORMAT_QOA 1
-#define SUPPORT_FILEFORMAT_FLAC 1
+// #define SUPPORT_FILEFORMAT_FLAC         1
 #define SUPPORT_FILEFORMAT_XM 1
 #define SUPPORT_FILEFORMAT_MOD 1
 
@@ -312,7 +315,7 @@
 // Show TRACELOG() output messages
 // NOTE: By default LOG_DEBUG traces not shown
 #define SUPPORT_TRACELOG 1
-#define SUPPORT_TRACELOG_DEBUG 1
+// #define SUPPORT_TRACELOG_DEBUG          1
 
 // utils: Configuration values
 //------------------------------------------------------------------------------------
