@@ -4,10 +4,14 @@
 [x] Add text support.
 [x] Selected image only erasure.
 [x] Compositing into entities.
+[x] Fix text and images z collision.
+
+[ ] Color Picker
+[ ] Make Rectangle and choose color.
+[ ] Allow choosing color for text.
 [ ] Per image erasure.
 [ ] Allow rotation - slider at bottom of the image.
 [ ] Split using transparency.
 [ ] Drag based editing.
 
-[ ] Fix text and images z collision.
 [ ] Add ai model for better background removal.

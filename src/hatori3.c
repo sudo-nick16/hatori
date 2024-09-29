@@ -516,10 +516,16 @@ bool is_mouse_moving(void)
 
 void handle_input_lines(void)
 {
-	if (mode == PEN_MODE) {
+	if (mode == PEN_MODE
+			&& !CheckCollisionPointRec(GetMousePosition(),
+					(Rectangle) { top_controls.pos.x, top_controls.pos.y,
+							top_controls.size.x, top_controls.size.y })) {
 		if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
 			prev_cursor_x = cursor_x;
 			prev_cursor_y = cursor_y;
+		}
+		if (is_mouse_moving()) {
+			printf("moving penmode\n");
 		}
 		if (is_mouse_moving() && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
 			Hatori_Line l = (Hatori_Line) {
@@ -1621,7 +1627,7 @@ void handle_mouse_input_entities(void)
 	if (selected == -1) {
 		img_controls.selected = -1;
 		resizer.selected = -1;
-		mode = SELECTION_MODE;
+		// mode = SELECTION_MODE;
 	}
 	selected_entity = selected;
 }
