@@ -3,12 +3,14 @@
 if [ "$1" = "build-web" ]; then
 	echo "building the app for web"
 	mkdir -p build
-	# -s LINKABLE=1 -s EXPORT_ALL=1 -sERROR_ON_UNDEFINED_SYMBOLS=0 \
-	emcc -DPLATFORM_WEB=1 -Os -o build/index.html src/hatori3.c -I./src/external/raylib/src -L./lib -l:libraylibweb.a \
-	-s USE_WEBGL2=1 -s ASYNCIFY -sFULL_ES3 -s USE_GLFW=3  --shell-file=hatori.html \
-	-s ALLOW_MEMORY_GROWTH -s "EXPORTED_RUNTIME_METHODS=['ccall']" \
+	# -s LINKABLE=1 -s EXPORT_ALL=1 -s ERROR_ON_UNDEFINED_SYMBOLS=0 \
+	emcc -DPLATFORM_WEB=1 -Os -o build/index.html src/hatori3.c -L./lib -l:libraylibweb.a \
+	-s USE_WEBGL2=1 -s ASYNCIFY -s FULL_ES3 -s USE_GLFW=3  --shell-file=hatori.html \
+	-s ALLOW_MEMORY_GROWTH=1 -s "EXPORTED_RUNTIME_METHODS=['ccall', 'cwrap']" \
+	-s EXPORTED_FUNCTIONS="['_malloc', '_main', '_add_image']" \
 	--preload-file assets -s FORCE_FILESYSTEM=1 \
-	 -s MINIFY_HTML=0
+	-s STACK_SIZE=100000000 \
+	-s MINIFY_HTML=0 
 	exit 0
 fi
 

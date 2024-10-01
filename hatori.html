@@ -27,8 +27,29 @@
 				return canvas;
 			})(),
 		};
-	</script>
+		window.addEventListener("paste", (e) => {
+			const items = e.clipboardData.items;
+			if (items.length < 1) {
+				return;
+			}
+			const item = items[0];
+			if (item.kind == "file") {
+				const type = "." + item.type.split("/")[1];
+				const blob = item.getAsFile();
+				const reader = new FileReader();
+				reader.onload = function (event) {
+					const data = new Uint8Array(event.target.result);
+					const size = data.length * data.BYTES_PER_ELEMENT;
+					const data_ptr = Module._malloc(size);
+					const data_on_heap = new Uint8Array(Module.HEAPU8.buffer, data_ptr, size);
+					data_on_heap.set(data);
+					Module.ccall("add_image", null, ["string", "number", "number"], [type, data_on_heap.byteOffset, data.length]);
+				}
+				reader.readAsArrayBuffer(blob);
+			}
 
+		})
+	</script>
 
 </body>
 

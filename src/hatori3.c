@@ -207,7 +207,7 @@ void draw_entities(void);
 bool is_image_selected(void);
 bool is_text_selected(void);
 
-extern U8* get_image_data(void);
+extern void add_image(char* file_type, U8* data, int size);
 
 Mode mode;
 float offset_x;
@@ -234,9 +234,8 @@ int selected_entity = -1;
 
 int main(void)
 {
-
-	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 	SetConfigFlags(FLAG_MSAA_4X_HINT);
+	SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 
 	const int WIDTH = 800;
 	const int HEIGHT = 600;
@@ -524,9 +523,6 @@ void handle_input_lines(void)
 			prev_cursor_x = cursor_x;
 			prev_cursor_y = cursor_y;
 		}
-		if (is_mouse_moving()) {
-			printf("moving penmode\n");
-		}
 		if (is_mouse_moving() && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
 			Hatori_Line l = (Hatori_Line) {
 				.x0 = to_virtual_x(prev_cursor_x),
@@ -645,7 +641,7 @@ void take_screenshot_rect(const char* filepath, Rectangle rect)
 	}
 
 	if (is_empty) {
-		printf("why is screen data empty?\n");
+		printf("empty data\n");
 		RL_FREE(screenData);
 		return;
 	}
@@ -900,6 +896,9 @@ void copy_on_click(void)
 		for (U64 i = 0; i < htxt.text.count; ++i) {
 			list_append(&copy_text, htxt.text.items[i]);
 		}
+		for (int i = copy_text.count; i < copy_text.capacity; ++i) {
+			copy_text.items[i] = '\0';
+		}
 		htxt.pos.x += 10 * scale;
 		htxt.pos.y += 10 * scale;
 		htxt.text.items = copy_text.items;
@@ -1039,11 +1038,6 @@ void handle_shortcuts(void)
 			img_controls.selected = -1;
 		}
 	}
-	if (IsKeyDown(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_V)) {
-		const char* buf = GetClipboardText();
-		printf("buf: %s\n", buf);
-	}
-	if (IsKeyPressed(KEY_T)) { }
 }
 
 void handle_input_slider(Hatori_Slider* slider)
@@ -1157,13 +1151,26 @@ void handle_input_resizer(void)
 	Vector2 pos = GetMousePosition();
 	int selected = resizer.selected;
 
-	if (resizer.selected != -1) {
+	if (resizer.selected != -1 && is_mouse_moving()) {
 		if (is_image_selected()) {
 			if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
 				entities.items[selected_entity].entity.image.size.x
 						+= (cursor_x - prev_cursor_x) / scale;
 				entities.items[selected_entity].entity.image.size.y
 						+= (cursor_y - prev_cursor_y) / scale;
+
+				// if (entities.items[selected_entity].entity.image.size.x < 0) {
+				// 	entities.items[selected_entity].entity.image.pos.x
+				// 			+= entities.items[selected_entity].entity.image.size.x * scale;
+				// 	entities.items[selected_entity].entity.image.size.x
+				// 			= fabs(entities.items[selected_entity].entity.image.size.x);
+				// }
+				//
+				// entities.items[selected_entity].entity.image.size.x
+				// 		= fabs(entities.items[selected_entity].entity.image.size.x);
+				// entities.items[selected_entity].entity.image.size.y
+				// 		= fabs(entities.items[selected_entity].entity.image.size.y);
+
 				prev_cursor_x = cursor_x;
 				prev_cursor_y = cursor_y;
 			} else {
@@ -1221,7 +1228,6 @@ void handle_input_resizer(void)
 				prev_cursor_y = cursor_y;
 				selected = 4;
 			}
-			prev_cursor_y = cursor_y;
 		} else {
 			selected = -1;
 		}
@@ -1429,7 +1435,6 @@ void handle_color_removal(void)
 		Hatori_Image img = entities.items[selected_entity].entity.image;
 		if (CheckCollisionPointRec(pos, get_image_resizer_rect(img))
 				&& IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-			printf("clicked bruda\n");
 			Vector2 rel_pos;
 			rel_pos.x = (int)to_true_img_x(img, pos.x);
 			rel_pos.y = (int)to_true_img_y(img, pos.y);
@@ -1437,7 +1442,6 @@ void handle_color_removal(void)
 			flood_remove(&img.current, rel_pos, 30);
 			UpdateTexture(img.texture, img.current.data);
 		} else {
-			printf("hair removal not collison\n");
 			if (!CheckCollisionPointRec(pos,
 							(Rectangle) { img_controls.pos.x, img_controls.pos.y,
 									img_controls.size.x, img_controls.size.y })
@@ -1770,4 +1774,25 @@ void update_text_controls(void)
 	} else {
 		text_controls.show = false;
 	}
+}
+
+void add_image(char* file_type, U8* data, int size)
+{
+	Image img = LoadImageFromMemory(file_type, data, size);
+	Texture2D texture = LoadTextureFromImage(img);
+
+	Hatori_Image himg = { 0 };
+	himg.pos.x = to_virtual_x(GetScreenWidth() / 2.0);
+	himg.pos.y = to_virtual_y(GetScreenHeight() / 2.0);
+	himg.size.x = img.width;
+	himg.size.y = img.height;
+	himg.texture = texture;
+	himg.original = img;
+	himg.current = ImageCopy(img);
+
+	Hatori_Entity e = { 0 };
+	e.z = z++;
+	e.type = ENTITY_IMAGE;
+	e.entity.image = himg;
+	list_append(&entities, e);
 }

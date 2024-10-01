@@ -14,7 +14,8 @@
 
 #define list_init(list, cap)                                                   \
 	do {                                                                         \
-		(list)->items = malloc(sizeof(*(list)->items) * cap);                      \
+		(list)->items                                                              \
+				= calloc(sizeof(*(list)->items) * cap, sizeof(*(list)->items));        \
 		assert((list)->items != NULL && "Buy more RAM!!");                         \
 		(list)->count = 0;                                                         \
 		(list)->capacity = (cap);                                                  \
@@ -31,6 +32,13 @@
 			(list)->items = tmp;                                                     \
 		}                                                                          \
 		(list)->items[(list)->count++] = (item);                                   \
+	} while (0)
+
+#define list_pop(list)                                                         \
+	do {                                                                         \
+		if ((list)->count - 1 > 0) {                                               \
+			(list)->count--;                                                         \
+		}                                                                          \
 	} while (0)
 
 #define list_clear(list)                                                       \

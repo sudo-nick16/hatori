@@ -6,6 +6,7 @@
 [x] Compositing into entities.
 [x] Fix text and images z collision.
 
+[ ] Make all vertices work in resizer.
 [ ] Color Picker
 [ ] Make Rectangle and choose color.
 [ ] Allow choosing color for text.
