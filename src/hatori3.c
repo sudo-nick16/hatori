@@ -5,8 +5,10 @@
 #include <time.h>
 
 #include "ds.h"
+#include "external/raylib/src/external/stb_image_write.h"
 #include "external/raylib/src/raylib.h"
 #include "external/raylib/src/rlgl.h"
+#include <emscripten/emscripten.h>
 
 typedef uint64_t U64;
 typedef uint32_t U32;
@@ -19,6 +21,9 @@ static const Color HATORI_ACCENT = { 49, 48, 59, 255 };
 static const Color HATORI_SECONDARY = { 64, 62, 106, 255 };
 
 extern const char* GetFileName(const char* filePath);
+
+extern unsigned char* stbi_write_png_to_mem(const unsigned char* pixels,
+		int stride_bytes, int x, int y, int n, int* out_len);
 
 typedef enum {
 	ENTITY_IMAGE,
@@ -208,6 +213,7 @@ bool is_image_selected(void);
 bool is_text_selected(void);
 
 extern void add_image(char* file_type, U8* data, int size);
+extern void download_image(char* file_type, U8* data);
 
 Mode mode;
 float offset_x;
@@ -684,10 +690,15 @@ void take_screenshot_rect(const char* filepath, Rectangle rect)
 	list_append(&entities, e);
 
 	char path[512] = { 0 };
+#if defined(PLATFORM_WEB)
+	U8* filedata = stbi_write_png_to_mem(
+			(const unsigned char*)imgData, width * 4, width, height, 4, NULL);
+	EM_ASM({ download($0, $1, $2); }, filepath, filedata, width * height * 4);
+#else
 	strcpy(
 			path, TextFormat("%s/%s", GetWorkingDirectory(), GetFileName(filepath)));
-
 	ExportImage(image, path);
+#endif
 }
 
 void handle_input_screenshot(void)
@@ -1591,7 +1602,7 @@ void handle_mouse_input_entities(void)
 	Vector2 pos = GetMousePosition();
 	int selected = selected_entity;
 	if (mode == ERASURE_MODE || mode == SCREENSHOT_MODE
-			|| mode == DRAW_SCREENSHOT_MODE) {
+			|| mode == DRAW_SCREENSHOT_MODE || mode == PEN_MODE) {
 		return;
 	}
 	for (int i = entities.count - 1; i >= 0; --i) {
@@ -1779,6 +1790,7 @@ void update_text_controls(void)
 void add_image(char* file_type, U8* data, int size)
 {
 	Image img = LoadImageFromMemory(file_type, data, size);
+	ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
 	Texture2D texture = LoadTextureFromImage(img);
 
 	Hatori_Image himg = { 0 };
